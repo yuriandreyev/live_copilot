@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import SecretStr, StringConstraints
+from pydantic import Field, SecretStr, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     )
 
     postgres_db: NonBlank
+    postgres_host: NonBlank = "127.0.0.1"
+    postgres_port: Annotated[int, Field(ge=1, le=65535)] = 5432
     postgres_user: NonBlank
     postgres_password: Password
     rabbitmq_default_user: NonBlank

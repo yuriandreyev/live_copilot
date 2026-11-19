@@ -1,0 +1,2 @@
+class SessionNotFound(LookupError):
+    pass

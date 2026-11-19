@@ -1,7 +1,7 @@
 export UV_CACHE_DIR ?= .uv-cache
 UV_RUN = uv run --locked --no-sync
 
-.PHONY: sync lint format test run-api run-worker infra-up infra-down db-up db-down migrate
+.PHONY: sync lint format test test-integration run-api run-worker infra-up infra-down db-up db-down migrate
 
 sync:
 	uv sync --locked
@@ -14,7 +14,10 @@ format:
 	$(UV_RUN) ruff format .
 
 test:
-	$(UV_RUN) pytest
+	$(UV_RUN) pytest tests/unit
+
+test-integration:
+	$(UV_RUN) pytest tests/integration
 
 run-api:
 	$(UV_RUN) uvicorn api.main:create_app --factory --host 127.0.0.1 --port 8000
@@ -35,5 +38,4 @@ db-down:
 	docker compose stop postgres
 
 migrate:
-	@echo "Database migrations are scheduled for WP03."
-	@exit 1
+	$(UV_RUN) alembic upgrade head

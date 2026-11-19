@@ -1,7 +1,8 @@
 # Live AI Copilot
 
 Local AI copilot for support conversations. The WP01 scaffold provides the API
-liveness endpoint and local PostgreSQL and RabbitMQ infrastructure.
+liveness endpoint and local PostgreSQL and RabbitMQ infrastructure. WP03 adds database
+migrations and session HTTP endpoints.
 
 ## Prerequisites
 
@@ -16,6 +17,7 @@ cp .env.example .env
 make sync
 make infra-up
 docker compose ps
+make migrate
 make run-api
 ```
 
@@ -36,10 +38,24 @@ on loopback port 5432, RabbitMQ on 5672, and RabbitMQ management on 15672.
 | `make sync` | Install the project and development tools from `uv.lock` |
 | `make lint` | Check lint and formatting |
 | `make format` | Format Python files |
-| `make test` | Run pytest |
+| `make test` | Run the unit tests |
+| `make test-integration` | Run the PostgreSQL integration tests. Start PostgreSQL first. The configured development role needs permission to create a database. |
 | `make run-api` | Start the API at http://localhost:8000 |
 | `make run-worker` | Run the worker scaffold, which reports its status and exits. Event consumption arrives in WP09. |
 | `make infra-up` | Start PostgreSQL and RabbitMQ and wait for both to become healthy |
 | `make infra-down` | Stop and remove the infrastructure containers while retaining their data volumes |
 | `make db-up` / `make db-down` | Start or stop PostgreSQL alone |
-| `make migrate` | Reports that migrations are unavailable until WP03 and exits with an error |
+| `make migrate` | Apply pending PostgreSQL schema migrations |
+
+## Session API
+
+| Request | Result |
+| --- | --- |
+| `POST /api/sessions` | HTTP 201 with a new UUID and `created` status |
+| `GET /api/sessions/{id}` | State, timestamps, and summary availability |
+| `GET /api/sessions/{id}/transcript` | Utterances ordered by sequence, with their recommendations ordered by context version |
+| `GET /api/sessions/{id}/report` | Stored summary and summary timestamp, both null until a summary exists |
+
+The read endpoints return HTTP 404 for unknown session IDs. PostgreSQL
+defaults to `127.0.0.1:5432`. To connect the API or Alembic elsewhere, set
+`POSTGRES_HOST` and `POSTGRES_PORT`.
