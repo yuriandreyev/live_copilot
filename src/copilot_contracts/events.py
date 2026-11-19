@@ -1,0 +1,115 @@
+from typing import Annotated, Literal, Self
+from uuid import UUID
+
+from pydantic import Field, TypeAdapter, field_validator, model_validator
+
+from copilot_contracts.agents import AgentContext, Recommendation
+from copilot_contracts.types import Contract, NonBlank, PositiveSequence, UtcTimestamp
+
+Milliseconds = Annotated[int, Field(strict=True, ge=0)]
+
+
+class Envelope(Contract):
+    schema_version: Literal[1]
+    session_id: UUID
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema_version_type(cls, version: object) -> object:
+        if type(version) is not int:
+            raise ValueError("schema_version must be an integer")
+        return version
+
+
+class EmptyPayload(Contract):
+    pass
+
+
+class ClientCommandEnvelope(Envelope):
+    payload: EmptyPayload = Field(default_factory=EmptyPayload)
+
+
+class CaptureStart(ClientCommandEnvelope):
+    event_type: Literal["capture.start"]
+
+
+class CaptureStop(ClientCommandEnvelope):
+    event_type: Literal["capture.stop"]
+
+
+type ClientCommand = Annotated[
+    CaptureStart | CaptureStop, Field(discriminator="event_type")
+]
+client_command_adapter: TypeAdapter[ClientCommand] = TypeAdapter(ClientCommand)
+
+
+class EventEnvelope(Envelope):
+    event_id: UUID
+    correlation_id: UUID
+    sequence: PositiveSequence
+    occurred_at: UtcTimestamp
+
+
+class TranscriptWindow(Contract):
+    start_ms: Milliseconds
+    end_ms: Milliseconds
+    text: NonBlank
+
+    @model_validator(mode="after")
+    def validate_audio_window(self) -> Self:
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+
+class FinalizedUtterance(TranscriptWindow):
+    utterance_id: UUID
+
+
+class TranscriptInterim(EventEnvelope):
+    """Transient WebSocket update."""
+
+    event_type: Literal["transcript.interim"]
+    payload: TranscriptWindow
+
+
+class TranscriptFinal(EventEnvelope):
+    event_type: Literal["transcript.final"]
+    payload: FinalizedUtterance
+
+
+class AnalysisPayload(Contract):
+    utterance_id: UUID
+    context_version: PositiveSequence
+    context: AgentContext
+
+
+class AnalysisCompleted(EventEnvelope):
+    event_type: Literal["analysis.completed"]
+    payload: AnalysisPayload
+
+
+class RecommendationCreated(EventEnvelope):
+    event_type: Literal["recommendation.created"]
+    payload: Recommendation
+
+
+class SessionCompleted(EventEnvelope):
+    event_type: Literal["session.completed"]
+    payload: EmptyPayload = Field(default_factory=EmptyPayload)
+
+
+type DurableEvent = Annotated[
+    TranscriptFinal | RecommendationCreated | SessionCompleted,
+    Field(discriminator="event_type"),
+]
+type ServerEvent = Annotated[
+    TranscriptInterim
+    | TranscriptFinal
+    | AnalysisCompleted
+    | RecommendationCreated
+    | SessionCompleted,
+    Field(discriminator="event_type"),
+]
+durable_event_adapter: TypeAdapter[DurableEvent] = TypeAdapter(DurableEvent)
+server_event_adapter: TypeAdapter[ServerEvent] = TypeAdapter(ServerEvent)
