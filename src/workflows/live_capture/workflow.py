@@ -1,16 +1,16 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import dataclass, field
 from enum import Enum, auto
+from itertools import count
 from uuid import UUID
 
 from anyio import CancelScope
 
 from copilot_contracts.transcription import TranscriptWindow
-from session.application.ports.live_session import LiveSessionStore
-from session.domain.enums import SessionStatus
-from session.domain.session import Session
-from transcription.application.ports.audio import SpeechRecognizer
+from session.public import SessionLifecycle, SessionStatus
+from transcription.public import SpeechRecognizer
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +41,23 @@ type CaptureUpdate = SessionStatus | TranscriptWindow | CaptureRejected
 type Send = Callable[[int, CaptureUpdate], Awaitable[None]]
 
 
+@dataclass
+class _CaptureState:
+    id: UUID
+    status: SessionStatus = SessionStatus.CREATED
+    sequence: Iterator[int] = field(default_factory=lambda: count(1))
+
+
 class LiveCapture:
     def __init__(
         self,
-        store: LiveSessionStore,
+        lifecycle: SessionLifecycle,
         recognizer_factory: Callable[[], SpeechRecognizer],
         *,
         audio_capacity: int = 30,
         flush_timeout: float = 5,
     ) -> None:
-        self._store = store
+        self._lifecycle = lifecycle
         self._recognizer_factory = recognizer_factory
         self._audio_capacity = audio_capacity
         self._flush_timeout = flush_timeout
@@ -59,13 +66,13 @@ class LiveCapture:
     async def run(
         self, session_id: UUID, receive: Receive, send: Send
     ) -> CaptureOutcome | CaptureRejected:
-        session = Session(session_id)
+        session = _CaptureState(session_id)
         admitted = False
         try:
-            details = await self._store.get(session_id)
-            if details is None:
+            status = await self._lifecycle.get_status(session_id)
+            if status is None:
                 raise CaptureRejected("unknown_session", "Session does not exist.")
-            if details.status is not SessionStatus.CREATED:
+            if status is not SessionStatus.CREATED:
                 raise CaptureRejected(
                     "session_unavailable", "Session is no longer available."
                 )
@@ -109,14 +116,16 @@ class LiveCapture:
             if admitted:
                 self._admission.release()
 
-    async def _transition(self, session: Session, target: SessionStatus) -> None:
+    async def _transition(self, session: _CaptureState, target: SessionStatus) -> None:
         async def persist() -> None:
             with CancelScope(shield=True):
-                if not await self._store.transition(session.id, session.status, target):
+                if not await self._lifecycle.transition(
+                    session.id, session.status, target
+                ):
                     raise CaptureRejected(
                         "session_unavailable", "Session state changed."
                     )
-                session.transition_to(target)
+                session.status = target
 
         # Let a state write settle before disconnect cleanup chooses its next transition.
         write = asyncio.create_task(persist())
@@ -127,7 +136,7 @@ class LiveCapture:
                 await write
             raise
 
-    async def _terminate(self, session: Session, target: SessionStatus) -> None:
+    async def _terminate(self, session: _CaptureState, target: SessionStatus) -> None:
         if session.status in (SessionStatus.LIVE, SessionStatus.STOPPING):
             try:
                 await self._transition(session, target)
@@ -135,11 +144,11 @@ class LiveCapture:
                 logger.exception("session.termination_failed session_id=%s", session.id)
 
     async def _send_error(
-        self, session: Session, send: Send, error: CaptureRejected
+        self, session: _CaptureState, send: Send, error: CaptureRejected
     ) -> CaptureOutcome | CaptureRejected:
         try:
             async with asyncio.timeout(2):
-                await send(session.next_sequence(), error)
+                await send(next(session.sequence), error)
         except CaptureDisconnected:
             return CaptureOutcome.DISCONNECTED
         except TimeoutError:
@@ -148,7 +157,7 @@ class LiveCapture:
 
     async def _capture(
         self,
-        session: Session,
+        session: _CaptureState,
         recognizer: SpeechRecognizer,
         receive: Receive,
         send: Send,
@@ -186,7 +195,7 @@ class LiveCapture:
                 async with asyncio.timeout(self._flush_timeout):
                     await self._transition(session, SessionStatus.STOPPING)
                     async with emission:
-                        await outbound.put((session.next_sequence(), session.status))
+                        await outbound.put((next(session.sequence), session.status))
                     audio.put_nowait(None)
                     await receive(
                         session.status
@@ -202,16 +211,16 @@ class LiveCapture:
                 result = await recognizer.accept_frame(frame)
                 if result is not None:
                     async with emission:
-                        await outbound.put((session.next_sequence(), result))
+                        await outbound.put((next(session.sequence), result))
             result = await recognizer.finish()
             if result is not None:
-                await outbound.put((session.next_sequence(), result))
+                await outbound.put((next(session.sequence), result))
             await outbound.join()
             await self._transition(session, SessionStatus.COMPLETED)
-            await outbound.put((session.next_sequence(), session.status))
+            await outbound.put((next(session.sequence), session.status))
             await outbound.join()
 
-        outbound.put_nowait((session.next_sequence(), session.status))
+        outbound.put_nowait((next(session.sequence), session.status))
         receiver = asyncio.create_task(receive_frames())
         processor = asyncio.create_task(process_frames())
         sender = asyncio.create_task(send_events())

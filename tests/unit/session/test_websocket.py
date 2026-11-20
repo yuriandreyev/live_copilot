@@ -11,10 +11,11 @@ from starlette.websockets import WebSocketDisconnect
 from bootstrap.health import router as health_router
 from copilot_contracts.events import TranscriptWindow
 from session.application.ports import SessionDetails
-from session.application.use_cases.session.live_capture import LiveCapture
 from session.domain.enums import SessionStatus
 from session.presentation.websocket import MAX_FRAME_BYTES, websocket_routes
+from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from workflows.live_capture.workflow import LiveCapture
 
 FRAME_1 = b"\x01\x00" * 1600
 FRAME_2 = b"\xff\xff" * 1600
@@ -82,7 +83,7 @@ def make_client(
     app.include_router(
         websocket_routes(
             LiveCapture(
-                store,
+                SessionLifecycle(store),
                 lambda: recognizer,
                 audio_capacity=audio_capacity,
                 flush_timeout=flush_timeout,

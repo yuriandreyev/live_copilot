@@ -17,8 +17,14 @@ from copilot_contracts.events import (
     TranscriptInterim,
     client_command_adapter,
 )
-from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
-from session.application.use_cases.session.live_capture import (
+from copilot_contracts.transcription import (
+    SAMPLE_BYTES,
+    SAMPLE_RATE,
+    FinalizedUtterance,
+    TranscriptWindow,
+)
+from session.domain.enums import SessionStatus
+from workflows.live_capture.workflow import (
     CaptureCommand,
     CaptureDisconnected,
     CaptureOutcome,
@@ -26,8 +32,6 @@ from session.application.use_cases.session.live_capture import (
     CaptureUpdate,
     LiveCapture,
 )
-from session.domain.enums import SessionStatus
-from transcription.application.ports.audio import SAMPLE_BYTES, SAMPLE_RATE
 
 MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
 

@@ -20,6 +20,14 @@ class InvalidSessionTransition(ValueError):
     pass
 
 
+def validate_transition(previous: SessionStatus, target: SessionStatus) -> None:
+    if (
+        not isinstance(target, SessionStatus)
+        or target not in _ALLOWED_TRANSITIONS[previous]
+    ):
+        raise InvalidSessionTransition(f"Cannot transition from {previous} to {target}")
+
+
 class Session:
     def __init__(self, session_id: UUID | None = None) -> None:
         self._id = session_id if session_id is not None else uuid4()
@@ -39,13 +47,7 @@ class Session:
         return self._sequence
 
     def transition_to(self, status: SessionStatus) -> None:
-        if (
-            not isinstance(status, SessionStatus)
-            or status not in _ALLOWED_TRANSITIONS[self.status]
-        ):
-            raise InvalidSessionTransition(
-                f"Cannot transition from {self.status} to {status}"
-            )
+        validate_transition(self.status, status)
         self._status = status
 
     def next_sequence(self) -> int:

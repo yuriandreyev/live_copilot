@@ -13,12 +13,13 @@ from session.application.use_cases.session.create_session import CreateSession
 from session.application.use_cases.session.get_report import GetReport
 from session.application.use_cases.session.get_session import GetSession
 from session.application.use_cases.session.get_transcript import GetTranscript
-from session.application.use_cases.session.live_capture import LiveCapture
 from session.infrastructure.storage.database import build_engine
 from session.infrastructure.storage.sessions import PostgresSessionRepository
 from session.presentation.sessions import register_session_routes
 from session.presentation.websocket import websocket_routes
+from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from workflows.live_capture.workflow import LiveCapture
 
 
 class JsonFormatter(logging.Formatter):
@@ -62,5 +63,9 @@ def create_app() -> FastAPI:
         get_report_use_case=GetReport(repository),
     )
     app.include_router(health_router)
-    app.include_router(websocket_routes(LiveCapture(repository, FakeSpeechRecognizer)))
+    app.include_router(
+        websocket_routes(
+            LiveCapture(SessionLifecycle(repository), FakeSpeechRecognizer)
+        )
+    )
     return app

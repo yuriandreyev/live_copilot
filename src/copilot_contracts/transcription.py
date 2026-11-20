@@ -6,6 +6,8 @@ from pydantic import Field, model_validator
 from copilot_contracts.types import Contract, NonBlank
 
 Milliseconds = Annotated[int, Field(strict=True, ge=0)]
+SAMPLE_RATE = 16_000
+SAMPLE_BYTES = 2
 
 
 class TranscriptWindow(Contract):
