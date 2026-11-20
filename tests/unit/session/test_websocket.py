@@ -10,10 +10,10 @@ from starlette.websockets import WebSocketDisconnect
 
 from bootstrap.health import router as health_router
 from copilot_contracts.events import TranscriptWindow
-from session.application.live_session import MAX_FRAME_BYTES, LiveSessionGateway
 from session.application.ports import SessionDetails
+from session.application.use_cases.session.live_capture import LiveCapture
 from session.domain.enums import SessionStatus
-from session.presentation.websocket import websocket_routes
+from session.presentation.websocket import MAX_FRAME_BYTES, websocket_routes
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 
 FRAME_1 = b"\x01\x00" * 1600
@@ -81,7 +81,7 @@ def make_client(
     app.include_router(health_router)
     app.include_router(
         websocket_routes(
-            LiveSessionGateway(
+            LiveCapture(
                 store,
                 lambda: recognizer,
                 audio_capacity=audio_capacity,
@@ -163,6 +163,28 @@ def test_malformed_command_leaves_session_available(value: str) -> None:
             assert socket.receive_json()["payload"]["code"] == "invalid_command"
             assert_close(socket, 1008)
     assert store.statuses[session_id] is SessionStatus.CREATED
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_command_for_another_session_is_rejected(active: bool) -> None:
+    store = MemorySessionStore()
+    session_id = store.create()
+    other_session_id = store.create()
+    with make_client(store, FakeSpeechRecognizer()) as client:
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            if active:
+                start(socket, session_id)
+            command(
+                socket,
+                other_session_id,
+                "capture.stop" if active else "capture.start",
+            )
+            assert socket.receive_json()["payload"]["code"] == "invalid_command"
+            assert_close(socket, 1008)
+    assert store.statuses[session_id] is (
+        SessionStatus.FAILED if active else SessionStatus.CREATED
+    )
+    assert store.statuses[other_session_id] is SessionStatus.CREATED
 
 
 def test_stop_before_start_is_rejected() -> None:

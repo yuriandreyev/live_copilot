@@ -1,12 +1,11 @@
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator
 
 from copilot_contracts.agents import AgentContext, Recommendation
+from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
 from copilot_contracts.types import Contract, NonBlank, PositiveSequence, UtcTimestamp
-
-Milliseconds = Annotated[int, Field(strict=True, ge=0)]
 
 
 class Envelope(Contract):
@@ -48,22 +47,6 @@ class EventEnvelope(Envelope):
     correlation_id: UUID
     sequence: PositiveSequence
     occurred_at: UtcTimestamp
-
-
-class TranscriptWindow(Contract):
-    start_ms: Milliseconds
-    end_ms: Milliseconds
-    text: NonBlank
-
-    @model_validator(mode="after")
-    def validate_audio_window(self) -> Self:
-        if self.end_ms <= self.start_ms:
-            raise ValueError("end_ms must be greater than start_ms")
-        return self
-
-
-class FinalizedUtterance(TranscriptWindow):
-    utterance_id: UUID
 
 
 class TranscriptInterim(EventEnvelope):

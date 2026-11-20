@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from copilot_contracts.events import FinalizedUtterance, TranscriptWindow
+from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
 
 SAMPLE_RATE = 16_000
 SAMPLE_BYTES = 2

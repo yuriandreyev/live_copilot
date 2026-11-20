@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from session.application.ports import SessionDetails, SessionRepository
-from session.application.use_cases.sessions.errors import SessionNotFound
+from session.application.use_cases.session.errors import SessionNotFound
 
 
 class GetSession:

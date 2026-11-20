@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bootstrap.health import router as health_router
 from bootstrap.settings import Settings
-from session.application.live_session import LiveSessionGateway
-from session.application.use_cases.sessions.create_session import CreateSession
-from session.application.use_cases.sessions.get_report import GetReport
-from session.application.use_cases.sessions.get_session import GetSession
-from session.application.use_cases.sessions.get_transcript import GetTranscript
+from session.application.use_cases.session.create_session import CreateSession
+from session.application.use_cases.session.get_report import GetReport
+from session.application.use_cases.session.get_session import GetSession
+from session.application.use_cases.session.get_transcript import GetTranscript
+from session.application.use_cases.session.live_capture import LiveCapture
 from session.infrastructure.storage.database import build_engine
 from session.infrastructure.storage.sessions import PostgresSessionRepository
 from session.presentation.sessions import register_session_routes
@@ -62,7 +62,5 @@ def create_app() -> FastAPI:
         get_report_use_case=GetReport(repository),
     )
     app.include_router(health_router)
-    app.include_router(
-        websocket_routes(LiveSessionGateway(repository, FakeSpeechRecognizer))
-    )
+    app.include_router(websocket_routes(LiveCapture(repository, FakeSpeechRecognizer)))
     return app

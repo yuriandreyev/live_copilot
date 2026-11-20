@@ -1,55 +1,47 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from enum import Enum, auto
+from uuid import UUID
 
 from anyio import CancelScope
 
-from copilot_contracts.events import (
-    CaptureErrorEvent,
-    CaptureErrorPayload,
-    CaptureStart,
-    CaptureStop,
-    ClientCommand,
-    EventEnvelope,
-    ServerEvent,
-    SessionCompleted,
-    SessionStatusChanged,
-    SessionStatusPayload,
-    TranscriptFinal,
-    TranscriptInterim,
-)
+from copilot_contracts.transcription import TranscriptWindow
 from session.application.ports.live_session import LiveSessionStore
 from session.domain.enums import SessionStatus
 from session.domain.session import Session
-from transcription.application.ports.audio import (
-    SAMPLE_BYTES,
-    SAMPLE_RATE,
-    SpeechRecognizer,
-)
-
-MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
+from transcription.application.ports.audio import SpeechRecognizer
 
 logger = logging.getLogger(__name__)
 
 
-class ClientDisconnected(Exception):
+class CaptureDisconnected(Exception):
     pass
 
 
 class CaptureRejected(Exception):
-    def __init__(self, code: str, message: str, close_code: int = 1008) -> None:
+    def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
-        self.close_code = close_code
 
 
-type Receive = Callable[[], Awaitable[ClientCommand | bytes]]
-type Send = Callable[[ServerEvent], Awaitable[None]]
+class CaptureCommand(Enum):
+    START = auto()
+    STOP = auto()
 
 
-class LiveSessionGateway:
+class CaptureOutcome(Enum):
+    COMPLETED = auto()
+    DISCONNECTED = auto()
+    DELIVERY_TIMEOUT = auto()
+
+
+type Receive = Callable[[SessionStatus], Awaitable[CaptureCommand | bytes]]
+type CaptureUpdate = SessionStatus | TranscriptWindow | CaptureRejected
+type Send = Callable[[int, CaptureUpdate], Awaitable[None]]
+
+
+class LiveCapture:
     def __init__(
         self,
         store: LiveSessionStore,
@@ -64,7 +56,9 @@ class LiveSessionGateway:
         self._flush_timeout = flush_timeout
         self._admission = asyncio.Lock()
 
-    async def run(self, session_id: UUID, receive: Receive, send: Send) -> int | None:
+    async def run(
+        self, session_id: UUID, receive: Receive, send: Send
+    ) -> CaptureOutcome | CaptureRejected:
         session = Session(session_id)
         admitted = False
         try:
@@ -77,43 +71,39 @@ class LiveSessionGateway:
                 )
             try:
                 async with asyncio.timeout(10):
-                    command = await receive()
+                    command = await receive(session.status)
             except TimeoutError:
                 raise CaptureRejected(
                     "start_timeout", "Timed out waiting for capture.start."
                 ) from None
-            if isinstance(command, bytes) or command.session_id != session_id:
+            if isinstance(command, bytes):
                 raise CaptureRejected(
-                    "invalid_command", "Send capture.start for this session first."
+                    "invalid_command", "Start capture before sending audio."
                 )
-            if not isinstance(command, CaptureStart):
+            if command is not CaptureCommand.START:
                 raise CaptureRejected("command_order", "Send capture.start first.")
             if self._admission.locked():
-                raise CaptureRejected(
-                    "session_busy", "Another capture is active.", 1013
-                )
+                raise CaptureRejected("session_busy", "Another capture is active.")
 
             await self._admission.acquire()
             admitted = True
             recognizer = self._recognizer_factory()
             await self._transition(session, SessionStatus.LIVE)
             await self._capture(session, recognizer, receive, send)
-            return 1000
-        except (ClientDisconnected, asyncio.CancelledError) as error:
+            return CaptureOutcome.COMPLETED
+        except (CaptureDisconnected, asyncio.CancelledError) as error:
             with CancelScope(shield=True):
                 await self._terminate(session, SessionStatus.INTERRUPTED)
             if isinstance(error, asyncio.CancelledError):
                 raise
-            return None
+            return CaptureOutcome.DISCONNECTED
         except CaptureRejected as error:
             await self._terminate(session, SessionStatus.FAILED)
             return await self._send_error(session, send, error)
         except Exception:
             logger.exception("session.capture_failed session_id=%s", session.id)
             await self._terminate(session, SessionStatus.FAILED)
-            failure = CaptureRejected(
-                "capture_failed", "Capture could not finish.", 1011
-            )
+            failure = CaptureRejected("capture_failed", "Capture could not finish.")
             return await self._send_error(session, send, failure)
         finally:
             if admitted:
@@ -144,38 +134,17 @@ class LiveSessionGateway:
             except Exception:
                 logger.exception("session.termination_failed session_id=%s", session.id)
 
-    @staticmethod
-    def _envelope(session: Session) -> EventEnvelope:
-        return EventEnvelope(
-            schema_version=1,
-            event_id=uuid4(),
-            session_id=session.id,
-            correlation_id=session.id,
-            sequence=session.next_sequence(),
-            occurred_at=datetime.now(UTC),
-        )
-
     async def _send_error(
         self, session: Session, send: Send, error: CaptureRejected
-    ) -> int | None:
+    ) -> CaptureOutcome | CaptureRejected:
         try:
             async with asyncio.timeout(2):
-                await send(
-                    CaptureErrorEvent(
-                        **self._envelope(session).model_dump(),
-                        event_type="session.overloaded"
-                        if error.code == "audio_overload"
-                        else "session.error",
-                        payload=CaptureErrorPayload(
-                            code=error.code, message=str(error)
-                        ),
-                    )
-                )
-        except ClientDisconnected:
-            return None
+                await send(session.next_sequence(), error)
+        except CaptureDisconnected:
+            return CaptureOutcome.DISCONNECTED
         except TimeoutError:
-            return 1011
-        return error.close_code
+            return CaptureOutcome.DELIVERY_TIMEOUT
+        return error
 
     async def _capture(
         self,
@@ -186,7 +155,7 @@ class LiveSessionGateway:
     ) -> None:
         # Reserve one slot for the stop marker so a full audio queue can still be drained.
         audio: asyncio.Queue[bytes | None] = asyncio.Queue(self._audio_capacity + 1)
-        outbound: asyncio.Queue[ServerEvent] = asyncio.Queue(8)
+        outbound: asyncio.Queue[tuple[int, CaptureUpdate]] = asyncio.Queue(8)
         emission = asyncio.Lock()
 
         async def send_events() -> None:
@@ -194,36 +163,22 @@ class LiveSessionGateway:
                 event = await outbound.get()
                 try:
                     async with asyncio.timeout(2):
-                        await send(event)
+                        await send(*event)
                 finally:
                     outbound.task_done()
 
         async def receive_frames() -> None:
             while True:
-                frame = await receive()
+                frame = await receive(session.status)
                 if isinstance(frame, bytes):
-                    if (
-                        not frame
-                        or len(frame) % SAMPLE_BYTES
-                        or len(frame) > MAX_FRAME_BYTES
-                    ):
-                        raise CaptureRejected(
-                            "invalid_audio",
-                            f"Send 2 to {MAX_FRAME_BYTES} bytes of PCM16 per frame.",
-                        )
                     if audio.qsize() >= self._audio_capacity:
                         raise CaptureRejected(
                             "audio_overload",
                             "Audio queue is full. Capture ended.",
-                            1013,
                         )
                     audio.put_nowait(frame)
                     continue
-                if frame.session_id != session.id:
-                    raise CaptureRejected(
-                        "invalid_command", "Command session ID must match the socket."
-                    )
-                if not isinstance(frame, CaptureStop):
+                if frame is not CaptureCommand.STOP:
                     raise CaptureRejected("command_order", "Capture is already active.")
                 break
 
@@ -231,21 +186,15 @@ class LiveSessionGateway:
                 async with asyncio.timeout(self._flush_timeout):
                     await self._transition(session, SessionStatus.STOPPING)
                     async with emission:
-                        await outbound.put(
-                            SessionStatusChanged(
-                                **self._envelope(session).model_dump(),
-                                event_type="session.status",
-                                payload=SessionStatusPayload(status="stopping"),
-                            )
-                        )
+                        await outbound.put((session.next_sequence(), session.status))
                     audio.put_nowait(None)
-                    await (
-                        receive()
+                    await receive(
+                        session.status
                     )  # Keep watching for a disconnect while the processor flushes.
                     raise CaptureRejected("command_order", "Capture is stopping.")
             except TimeoutError:
                 raise CaptureRejected(
-                    "flush_timeout", "Capture could not flush in time.", 1011
+                    "flush_timeout", "Capture could not flush in time."
                 ) from None
 
         async def process_frames() -> None:
@@ -253,39 +202,16 @@ class LiveSessionGateway:
                 result = await recognizer.accept_frame(frame)
                 if result is not None:
                     async with emission:
-                        await outbound.put(
-                            TranscriptInterim(
-                                **self._envelope(session).model_dump(),
-                                event_type="transcript.interim",
-                                payload=result,
-                            )
-                        )
+                        await outbound.put((session.next_sequence(), result))
             result = await recognizer.finish()
             if result is not None:
-                await outbound.put(
-                    TranscriptFinal(
-                        **self._envelope(session).model_dump(),
-                        event_type="transcript.final",
-                        payload=result,
-                    )
-                )
+                await outbound.put((session.next_sequence(), result))
             await outbound.join()
             await self._transition(session, SessionStatus.COMPLETED)
-            await outbound.put(
-                SessionCompleted(
-                    **self._envelope(session).model_dump(),
-                    event_type="session.completed",
-                )
-            )
+            await outbound.put((session.next_sequence(), session.status))
             await outbound.join()
 
-        outbound.put_nowait(
-            SessionStatusChanged(
-                **self._envelope(session).model_dump(),
-                event_type="session.status",
-                payload=SessionStatusPayload(status="live"),
-            )
-        )
+        outbound.put_nowait((session.next_sequence(), session.status))
         receiver = asyncio.create_task(receive_frames())
         processor = asyncio.create_task(process_frames())
         sender = asyncio.create_task(send_events())

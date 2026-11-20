@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from copilot_contracts.events import FinalizedUtterance, TranscriptWindow
+from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
 from transcription.application.ports.audio import SAMPLE_BYTES, SAMPLE_RATE
 
 FAKE_TEXT = "Simulated transcript"

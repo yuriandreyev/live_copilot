@@ -5,11 +5,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from session.application.ports import SessionDetails, SessionReport, SessionTranscript
-from session.application.use_cases.sessions.create_session import CreateSession
-from session.application.use_cases.sessions.errors import SessionNotFound
-from session.application.use_cases.sessions.get_report import GetReport
-from session.application.use_cases.sessions.get_session import GetSession
-from session.application.use_cases.sessions.get_transcript import GetTranscript
+from session.application.use_cases.session.create_session import CreateSession
+from session.application.use_cases.session.errors import SessionNotFound
+from session.application.use_cases.session.get_report import GetReport
+from session.application.use_cases.session.get_session import GetSession
+from session.application.use_cases.session.get_transcript import GetTranscript
 from session.domain.enums import SessionStatus
 
 
