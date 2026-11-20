@@ -38,15 +38,18 @@ on loopback port 5432, RabbitMQ on 5672, and RabbitMQ management on 15672.
 | `make sync` | Install the project and development tools from `uv.lock` |
 | `make lint` | Check lint and formatting with Ruff and types with mypy |
 | `make format` | Format Python files |
-| `make test` | Run the unit tests |
-| `make verify` | Run lint, formatting, type checks, and unit tests |
-| `make test-integration` | Run the PostgreSQL integration tests. Start PostgreSQL first. The configured development role needs permission to create a database. |
+| `make test` | Run the unit and integration tests |
+| `make verify` | Run lint, formatting, type checks, and the full test suite |
 | `make run-api` | Start the API at http://localhost:8000 |
 | `make run-worker` | Run the worker scaffold, which reports its status and exits. Event consumption arrives in WP09. |
 | `make infra-up` | Start PostgreSQL and RabbitMQ and wait for both to become healthy |
 | `make infra-down` | Stop and remove the infrastructure containers while retaining their data volumes |
 | `make db-up` / `make db-down` | Start or stop PostgreSQL alone |
 | `make migrate` | Apply pending PostgreSQL schema migrations |
+
+Before running `make test` or `make verify`, start PostgreSQL with
+`make db-up`. The configured development role needs permission to create
+the temporary integration test database.
 
 ## Session API
 
