@@ -33,6 +33,15 @@ def test_healthz_is_available_without_running_services(
     assert response.json() == {"status": "ok"}
 
 
+def test_app_serves_browser_capture_assets(configured_environment: None) -> None:
+    with TestClient(create_app()) as client:
+        index = client.get("/")
+        assert index.status_code == 200
+        assert 'src="/app.js"' in index.text
+        for path in ("/app.js", "/audio-worklet.js", "/style.css"):
+            assert client.get(path).status_code == 200
+
+
 @pytest.mark.parametrize("value", [None, ""])
 def test_app_creation_fails_without_postgres_password(
     configured_environment: None, monkeypatch: pytest.MonkeyPatch, value: str | None

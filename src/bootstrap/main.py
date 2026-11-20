@@ -3,8 +3,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bootstrap.health import router as health_router
@@ -68,4 +70,8 @@ def create_app() -> FastAPI:
             LiveCapture(SessionLifecycle(repository), FakeSpeechRecognizer)
         )
     )
+    web_directory = Path(__file__).with_name("web")
+    if not web_directory.is_dir():
+        web_directory = Path(__file__).resolve().parents[2] / "web"
+    app.mount("/", StaticFiles(directory=web_directory, html=True), name="web")
     return app

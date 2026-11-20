@@ -25,6 +25,11 @@ In a second terminal, run `curl -f http://localhost:8000/healthz`.
 Expect HTTP 200 and `{"status":"ok"}`. The probe checks API liveness and
 does not connect to PostgreSQL or RabbitMQ.
 
+Open http://localhost:8000 in Chromium, select **Start capture**, and allow
+microphone access. Speak briefly, then select **Stop** to flush and finalize
+the capture. The current fake recognizer displays simulated text.
+Run the audio conversion tests with `node --test tests/web/audio-worklet.test.cjs`.
+
 The API loads settings from `.env` and gives process environment variables
 precedence. The PostgreSQL database, username and password and the RabbitMQ
 username and password are required. `LOG_LEVEL` defaults to `INFO`.
