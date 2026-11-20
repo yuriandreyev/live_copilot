@@ -1,44 +1,24 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from itertools import count
 from uuid import UUID
 
 from anyio import CancelScope
 
-from copilot_contracts.transcription import TranscriptWindow
 from session.public import SessionLifecycle, SessionStatus
 from transcription.public import SpeechRecognizer
+from workflows.live_capture.ports import (
+    CaptureCommand,
+    CaptureDisconnected,
+    CaptureOutcome,
+    CaptureRejected,
+    CaptureTransport,
+    CaptureUpdate,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class CaptureDisconnected(Exception):
-    pass
-
-
-class CaptureRejected(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-class CaptureCommand(Enum):
-    START = auto()
-    STOP = auto()
-
-
-class CaptureOutcome(Enum):
-    COMPLETED = auto()
-    DISCONNECTED = auto()
-    DELIVERY_TIMEOUT = auto()
-
-
-type Receive = Callable[[SessionStatus], Awaitable[CaptureCommand | bytes]]
-type CaptureUpdate = SessionStatus | TranscriptWindow | CaptureRejected
-type Send = Callable[[int, CaptureUpdate], Awaitable[None]]
 
 
 @dataclass
@@ -64,7 +44,7 @@ class LiveCapture:
         self._admission = asyncio.Lock()
 
     async def run(
-        self, session_id: UUID, receive: Receive, send: Send
+        self, session_id: UUID, transport: CaptureTransport
     ) -> CaptureOutcome | CaptureRejected:
         session = _CaptureState(session_id)
         admitted = False
@@ -78,7 +58,7 @@ class LiveCapture:
                 )
             try:
                 async with asyncio.timeout(10):
-                    command = await receive(session.status)
+                    command = await transport.receive(session.status)
             except TimeoutError:
                 raise CaptureRejected(
                     "start_timeout", "Timed out waiting for capture.start."
@@ -96,7 +76,7 @@ class LiveCapture:
             admitted = True
             recognizer = self._recognizer_factory()
             await self._transition(session, SessionStatus.LIVE)
-            await self._capture(session, recognizer, receive, send)
+            await self._capture(session, recognizer, transport)
             return CaptureOutcome.COMPLETED
         except (CaptureDisconnected, asyncio.CancelledError) as error:
             with CancelScope(shield=True):
@@ -106,12 +86,12 @@ class LiveCapture:
             return CaptureOutcome.DISCONNECTED
         except CaptureRejected as error:
             await self._terminate(session, SessionStatus.FAILED)
-            return await self._send_error(session, send, error)
+            return await self._send_error(session, transport, error)
         except Exception:
             logger.exception("session.capture_failed session_id=%s", session.id)
             await self._terminate(session, SessionStatus.FAILED)
             failure = CaptureRejected("capture_failed", "Capture could not finish.")
-            return await self._send_error(session, send, failure)
+            return await self._send_error(session, transport, failure)
         finally:
             if admitted:
                 self._admission.release()
@@ -144,11 +124,14 @@ class LiveCapture:
                 logger.exception("session.termination_failed session_id=%s", session.id)
 
     async def _send_error(
-        self, session: _CaptureState, send: Send, error: CaptureRejected
+        self,
+        session: _CaptureState,
+        transport: CaptureTransport,
+        error: CaptureRejected,
     ) -> CaptureOutcome | CaptureRejected:
         try:
             async with asyncio.timeout(2):
-                await send(next(session.sequence), error)
+                await transport.publish(next(session.sequence), error)
         except CaptureDisconnected:
             return CaptureOutcome.DISCONNECTED
         except TimeoutError:
@@ -159,8 +142,7 @@ class LiveCapture:
         self,
         session: _CaptureState,
         recognizer: SpeechRecognizer,
-        receive: Receive,
-        send: Send,
+        transport: CaptureTransport,
     ) -> None:
         # Reserve one slot for the stop marker so a full audio queue can still be drained.
         audio: asyncio.Queue[bytes | None] = asyncio.Queue(self._audio_capacity + 1)
@@ -172,13 +154,13 @@ class LiveCapture:
                 event = await outbound.get()
                 try:
                     async with asyncio.timeout(2):
-                        await send(*event)
+                        await transport.publish(*event)
                 finally:
                     outbound.task_done()
 
         async def receive_frames() -> None:
             while True:
-                frame = await receive(session.status)
+                frame = await transport.receive(session.status)
                 if isinstance(frame, bytes):
                     if audio.qsize() >= self._audio_capacity:
                         raise CaptureRejected(
@@ -197,7 +179,7 @@ class LiveCapture:
                     async with emission:
                         await outbound.put((next(session.sequence), session.status))
                     audio.put_nowait(None)
-                    await receive(
+                    await transport.receive(
                         session.status
                     )  # Keep watching for a disconnect while the processor flushes.
                     raise CaptureRejected("command_order", "Capture is stopping.")

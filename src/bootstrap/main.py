@@ -16,9 +16,9 @@ from session.application.use_cases.session.get_transcript import GetTranscript
 from session.infrastructure.storage.database import build_engine
 from session.infrastructure.storage.sessions import PostgresSessionRepository
 from session.presentation.sessions import register_session_routes
-from session.presentation.websocket import websocket_routes
 from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from workflows.live_capture.infrastructure.websocket import websocket_routes
 from workflows.live_capture.workflow import LiveCapture
 
 

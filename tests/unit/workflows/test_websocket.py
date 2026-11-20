@@ -12,9 +12,13 @@ from bootstrap.health import router as health_router
 from copilot_contracts.events import TranscriptWindow
 from session.application.ports import SessionDetails
 from session.domain.enums import SessionStatus
-from session.presentation.websocket import MAX_FRAME_BYTES, websocket_routes
 from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from workflows.live_capture.infrastructure.websocket import (
+    MAX_FRAME_BYTES,
+    websocket_routes,
+)
+from workflows.live_capture.ports import CaptureCommand, CaptureOutcome, CaptureUpdate
 from workflows.live_capture.workflow import LiveCapture
 
 FRAME_1 = b"\x01\x00" * 1600
@@ -108,6 +112,35 @@ def assert_close(socket: WebSocketTestSession, code: int) -> None:
     with pytest.raises(WebSocketDisconnect) as closed:
         socket.receive_json()
     assert closed.value.code == code
+
+
+def test_capture_accepts_an_in_memory_transport() -> None:
+    store = MemorySessionStore()
+    session_id = store.create()
+    updates: list[tuple[int, CaptureUpdate]] = []
+
+    class MemoryTransport:
+        async def receive(self, status: SessionStatus) -> CaptureCommand | bytes:
+            if status is SessionStatus.CREATED:
+                return CaptureCommand.START
+            if status is SessionStatus.LIVE:
+                return CaptureCommand.STOP
+            await asyncio.Future[None]()
+            raise AssertionError("The workflow should cancel the pending receive")
+
+        async def publish(self, sequence: int, update: CaptureUpdate) -> None:
+            updates.append((sequence, update))
+
+    live_capture = LiveCapture(SessionLifecycle(store), FakeSpeechRecognizer)
+    outcome = asyncio.run(live_capture.run(session_id, MemoryTransport()))
+
+    assert outcome is CaptureOutcome.COMPLETED
+    assert store.statuses[session_id] is SessionStatus.COMPLETED
+    assert updates == [
+        (1, SessionStatus.LIVE),
+        (2, SessionStatus.STOPPING),
+        (3, SessionStatus.COMPLETED),
+    ]
 
 
 def test_capture_drains_frames_in_order_then_finalizes() -> None:
