@@ -9,11 +9,11 @@ from starlette.testclient import TestClient, WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from bootstrap.health import router as health_router
-from copilot_contracts.events import TranscriptWindow
 from session.application.ports import SessionDetails
 from session.domain.enums import SessionStatus
 from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from transcription.public import TranscriptWindow
 from workflows.live_capture.infrastructure.websocket import (
     MAX_FRAME_BYTES,
     websocket_routes,
@@ -160,14 +160,20 @@ def test_capture_drains_frames_in_order_then_finalizes() -> None:
     assert recognizer.frames == [FRAME_1, FRAME_2]
     assert [event["sequence"] for event in events] == [2, 3, 4, 5, 6]
     assert [
-        e["payload"]["end_ms"]
-        for e in events
-        if e["event_type"] == "transcript.interim"
-    ] == [100, 200]
+        e["payload"] for e in events if e["event_type"] == "transcript.interim"
+    ] == [
+        {"start_ms": 0, "end_ms": 100, "text": "Simulated transcript"},
+        {"start_ms": 0, "end_ms": 200, "text": "Simulated transcript"},
+    ]
     assert {"status": "stopping"} in [event["payload"] for event in events[:3]]
     assert events[-2]["event_type"] == "transcript.final"
-    assert events[-2]["payload"]["end_ms"] == 200
-    UUID(events[-2]["payload"]["utterance_id"])
+    utterance_id = UUID(events[-2]["payload"]["utterance_id"])
+    assert events[-2]["payload"] == {
+        "utterance_id": str(utterance_id),
+        "start_ms": 0,
+        "end_ms": 200,
+        "text": "Simulated transcript",
+    }
     assert events[-1]["event_type"] == "session.completed"
     assert store.statuses[session_id] is SessionStatus.COMPLETED
 

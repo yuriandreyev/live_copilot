@@ -5,13 +5,13 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from copilot_contracts.agents import Recommendation, agent_context_adapter
-from copilot_contracts.events import (
+from agents.public import Recommendation, agent_context_adapter
+from workflows.live_capture.infrastructure.events import (
     CaptureStart,
     CaptureStop,
-    FinalizedUtterance,
     RecommendationCreated,
     TranscriptFinal,
+    TranscriptFinalPayload,
     TranscriptInterim,
     client_command_adapter,
     durable_event_adapter,
@@ -32,7 +32,7 @@ def transcript_final() -> TranscriptFinal:
         session_id=SESSION_ID,
         sequence=12,
         occurred_at=datetime(2026, 11, 18, 8, tzinfo=UTC),
-        payload=FinalizedUtterance(
+        payload=TranscriptFinalPayload(
             utterance_id=UTTERANCE_ID,
             start_ms=8100,
             end_ms=12700,

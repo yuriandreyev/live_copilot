@@ -4,7 +4,14 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from copilot_contracts.events import (
+from session.public import SessionStatus
+from transcription.public import (
+    SAMPLE_BYTES,
+    SAMPLE_RATE,
+    FinalizedUtterance,
+    TranscriptWindow,
+)
+from workflows.live_capture.infrastructure.events import (
     CaptureErrorEvent,
     CaptureErrorPayload,
     CaptureStart,
@@ -14,16 +21,11 @@ from copilot_contracts.events import (
     SessionStatusChanged,
     SessionStatusPayload,
     TranscriptFinal,
+    TranscriptFinalPayload,
     TranscriptInterim,
+    TranscriptInterimPayload,
     client_command_adapter,
 )
-from copilot_contracts.transcription import (
-    SAMPLE_BYTES,
-    SAMPLE_RATE,
-    FinalizedUtterance,
-    TranscriptWindow,
-)
-from session.public import SessionStatus
 from workflows.live_capture.ports import (
     CaptureCommand,
     CaptureDisconnected,
@@ -65,11 +67,22 @@ def _server_event(
         )
     if isinstance(update, FinalizedUtterance):
         return TranscriptFinal(
-            **envelope, event_type="transcript.final", payload=update
+            **envelope,
+            event_type="transcript.final",
+            payload=TranscriptFinalPayload(
+                utterance_id=update.utterance_id,
+                start_ms=update.start_ms,
+                end_ms=update.end_ms,
+                text=update.text,
+            ),
         )
     if isinstance(update, TranscriptWindow):
         return TranscriptInterim(
-            **envelope, event_type="transcript.interim", payload=update
+            **envelope,
+            event_type="transcript.interim",
+            payload=TranscriptInterimPayload(
+                start_ms=update.start_ms, end_ms=update.end_ms, text=update.text
+            ),
         )
     if update is SessionStatus.COMPLETED:
         return SessionCompleted(**envelope, event_type="session.completed")

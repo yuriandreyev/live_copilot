@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from copilot_contracts.transcription import (
+from transcription.application.models import (
     SAMPLE_BYTES,
     SAMPLE_RATE,
     FinalizedUtterance,

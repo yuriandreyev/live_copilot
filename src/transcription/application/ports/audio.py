@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
+from transcription.application.models import FinalizedUtterance, TranscriptWindow
 
 
 class SpeechRecognizer(Protocol):

@@ -1,8 +1,8 @@
 from enum import Enum, auto
 from typing import Protocol
 
-from copilot_contracts.transcription import TranscriptWindow
 from session.public import SessionStatus
+from transcription.public import TranscriptWindow
 
 
 class CaptureDisconnected(Exception):

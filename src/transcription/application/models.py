@@ -1,16 +1,20 @@
 from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from copilot_contracts.types import Contract, NonBlank
+NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 Milliseconds = Annotated[int, Field(strict=True, ge=0)]
 SAMPLE_RATE = 16_000
 SAMPLE_BYTES = 2
 
 
-class TranscriptWindow(Contract):
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class TranscriptWindow(_Model):
     start_ms: Milliseconds
     end_ms: Milliseconds
     text: NonBlank

@@ -1,11 +1,15 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import Field, TypeAdapter, field_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from copilot_contracts.agents import AgentContext, Recommendation
-from copilot_contracts.transcription import FinalizedUtterance, TranscriptWindow
-from copilot_contracts.types import Contract, NonBlank, PositiveSequence, UtcTimestamp
+from agents.public import AgentContext, Recommendation
+from workflows.live_capture.infrastructure.event_types import (
+    Contract,
+    NonBlank,
+    PositiveSequence,
+    UtcTimestamp,
+)
 
 
 class Envelope(Contract):
@@ -49,16 +53,35 @@ class EventEnvelope(Envelope):
     occurred_at: UtcTimestamp
 
 
+Milliseconds = Annotated[int, Field(strict=True, ge=0)]
+
+
+class TranscriptInterimPayload(Contract):
+    start_ms: Milliseconds
+    end_ms: Milliseconds
+    text: NonBlank
+
+    @model_validator(mode="after")
+    def validate_audio_window(self) -> Self:
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+
+class TranscriptFinalPayload(TranscriptInterimPayload):
+    utterance_id: UUID
+
+
 class TranscriptInterim(EventEnvelope):
     """Transient WebSocket update."""
 
     event_type: Literal["transcript.interim"]
-    payload: TranscriptWindow
+    payload: TranscriptInterimPayload
 
 
 class TranscriptFinal(EventEnvelope):
     event_type: Literal["transcript.final"]
-    payload: FinalizedUtterance
+    payload: TranscriptFinalPayload
 
 
 class AnalysisPayload(Contract):
