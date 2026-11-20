@@ -10,7 +10,9 @@ Python 3.12, uv, GNU Make, and a running Docker Engine with Docker Compose v2.
 
 ## Local startup
 
-Run from the repository root.
+Run from the repository root. Place the [multilingual small model files](https://huggingface.co/Systran/faster-whisper-small/tree/536b066)
+(`config.json`, `model.bin`, `tokenizer.json`, and `vocabulary.txt`) in
+`models/faster-whisper-small/` before starting the API.
 
 ```sh
 cp .env.example .env
@@ -27,7 +29,8 @@ does not connect to PostgreSQL or RabbitMQ.
 
 Open http://localhost:8000 in Chromium, select **Start capture**, and allow
 microphone access. Speak briefly, then select **Stop** to flush and finalize
-the capture. The current fake recognizer displays simulated text.
+the capture. By default, the API loads the local model once at startup and
+transcribes Russian on CPU in `int8` mode.
 Run the audio conversion tests with `node --test tests/web/audio-worklet.test.cjs`.
 
 The API loads settings from `.env` and gives process environment variables
@@ -35,6 +38,16 @@ precedence. The PostgreSQL database, username and password and the RabbitMQ
 username and password are required. `LOG_LEVEL` defaults to `INFO`.
 The example passwords are local development placeholders. PostgreSQL listens
 on loopback port 5432, RabbitMQ on 5672, and RabbitMQ management on 15672.
+
+Set `ASR_LANGUAGE=auto` for language detection. The model path, device, and
+compute type are configurable via `ASR_MODEL_PATH`, `ASR_DEVICE`, and
+`ASR_COMPUTE_TYPE`. Set `ASR_BACKEND=fake` for a deterministic demo
+without model files. Missing or invalid local weights fail startup.
+
+Run `make smoke WAV=path/to/speech.wav` with a mono 16 kHz PCM16 WAV
+containing several seconds of continuous Russian speech. The smoke test
+requires both an interim and a final result. It uses local weights and
+accepts model and language overrides through `python -m transcription.smoke`.
 
 ## Developer commands
 
@@ -83,6 +96,6 @@ sends `session.overloaded` and terminates capture. A normal stop has up to
 five seconds to drain through the recognizer. Disconnecting before completion
 marks the session interrupted.
 
-WP04 uses a fake recognizer. Its interim and final messages contain simulated
-text, and the database records the session lifecycle. Transcript persistence
-arrives in WP08.
+The recognizer revises the current interim transcript and finalizes utterances
+after a pause, the maximum utterance length, or a stop command. The database
+currently records the session lifecycle. Transcript persistence arrives in WP08.

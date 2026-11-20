@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -20,6 +21,8 @@ from session.infrastructure.storage.sessions import PostgresSessionRepository
 from session.presentation.sessions import register_session_routes
 from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from transcription.infrastructure.audio.faster_whisper import FasterWhisper
+from transcription.public import SpeechRecognizer
 from workflows.live_capture.infrastructure.websocket import websocket_routes
 from workflows.live_capture.workflow import LiveCapture
 
@@ -48,12 +51,32 @@ def create_app() -> FastAPI:
 
     engine = build_engine(settings)
     repository = PostgresSessionRepository(async_sessionmaker(engine))
+    asr: FasterWhisper | None = None
+
+    def new_recognizer() -> SpeechRecognizer:
+        if settings.asr_backend == "fake":
+            return FakeSpeechRecognizer()
+        if asr is None:
+            raise RuntimeError("The ASR model is not loaded.")
+        return asr.new_recognizer()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        nonlocal asr
         try:
+            if settings.asr_backend == "faster-whisper":
+                asr = await asyncio.to_thread(
+                    FasterWhisper,
+                    settings.asr_model_path,
+                    device=settings.asr_device,
+                    compute_type=settings.asr_compute_type,
+                    language=settings.asr_language,
+                )
             yield
         finally:
+            if asr is not None:
+                asr.close()
+                asr = None
             await engine.dispose()
 
     app = FastAPI(title="Live AI Copilot", lifespan=lifespan)
@@ -66,9 +89,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(
-        websocket_routes(
-            LiveCapture(SessionLifecycle(repository), FakeSpeechRecognizer)
-        )
+        websocket_routes(LiveCapture(SessionLifecycle(repository), new_recognizer))
     )
     web_directory = Path(__file__).with_name("web")
     if not web_directory.is_dir():

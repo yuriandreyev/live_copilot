@@ -191,6 +191,24 @@ def test_invalid_audio_returns_visible_error(frame: bytes) -> None:
     assert store.statuses[session_id] is SessionStatus.FAILED
 
 
+def test_recognition_failure_emits_error_without_final_transcript() -> None:
+    class FailingRecognizer(FakeSpeechRecognizer):
+        async def accept_frame(self, frame: bytes) -> TranscriptWindow | None:
+            raise RuntimeError("Model inference failed")
+
+    store = MemorySessionStore()
+    session_id = store.create()
+    with make_client(store, FailingRecognizer()) as client:
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            start(socket, session_id)
+            socket.send_bytes(FRAME_1)
+            event = socket.receive_json()
+            assert event["event_type"] == "session.error"
+            assert event["payload"]["code"] == "capture_failed"
+            assert_close(socket, 1011)
+    assert store.statuses[session_id] is SessionStatus.FAILED
+
+
 @pytest.mark.parametrize(
     "value", ["{", '{"schema_version":2,"event_type":"capture.start"}']
 )

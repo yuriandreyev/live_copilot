@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, StringConstraints
@@ -23,3 +24,8 @@ class Settings(BaseSettings):
     rabbitmq_default_user: NonBlank
     rabbitmq_default_pass: Password
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    asr_backend: Literal["faster-whisper", "fake"] = "faster-whisper"
+    asr_model_path: Path = Path("models/faster-whisper-small")
+    asr_device: Literal["cpu", "cuda", "auto"] = "cpu"
+    asr_compute_type: NonBlank = "int8"
+    asr_language: NonBlank | None = "ru"

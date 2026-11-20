@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from bootstrap.main import create_app
 
 REQUIRED_SETTINGS = {
+    "ASR_BACKEND": "fake",
     "POSTGRES_DB": "test",
     "POSTGRES_USER": "test",
     "POSTGRES_PASSWORD": "test-only",
@@ -40,6 +41,16 @@ def test_app_serves_browser_capture_assets(configured_environment: None) -> None
         assert 'src="/app.js"' in index.text
         for path in ("/app.js", "/audio-worklet.js", "/style.css"):
             assert client.get(path).status_code == 200
+
+
+def test_app_startup_reports_missing_model(
+    configured_environment: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASR_BACKEND", "faster-whisper")
+    monkeypatch.setenv("ASR_MODEL_PATH", "missing-model")
+    with pytest.raises(FileNotFoundError, match="ASR model directory does not exist"):
+        with TestClient(create_app()):
+            pass
 
 
 @pytest.mark.parametrize("value", [None, ""])
