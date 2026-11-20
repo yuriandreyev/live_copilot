@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from transcription.application.models import (
+from transcription.domain.entities import (
     SAMPLE_BYTES,
     SAMPLE_RATE,
     FinalizedUtterance,

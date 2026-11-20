@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from transcription.application.models import FinalizedUtterance, TranscriptWindow
+from transcription.domain.entities import FinalizedUtterance, TranscriptWindow
 
 
 class SpeechRecognizer(Protocol):
