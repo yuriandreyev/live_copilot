@@ -113,8 +113,10 @@ class LiveSessionGateway:
         except Exception:
             logger.exception("session.capture_failed session_id=%s", session.id)
             await self._terminate(session, SessionStatus.FAILED)
-            error = CaptureRejected("capture_failed", "Capture could not finish.", 1011)
-            return await self._send_error(session, send, error)
+            failure = CaptureRejected(
+                "capture_failed", "Capture could not finish.", 1011
+            )
+            return await self._send_error(session, send, failure)
         finally:
             if admitted:
                 self._admission.release()

@@ -68,6 +68,7 @@ class SlowRecognizer(RecordingRecognizer):
             await asyncio.Event().wait()
         finally:
             self.cancelled.set()
+        return None
 
 
 def make_client(

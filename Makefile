@@ -1,7 +1,7 @@
 export UV_CACHE_DIR ?= .uv-cache
 UV_RUN = uv run --locked --no-sync
 
-.PHONY: sync lint format test test-integration run-api run-worker infra-up infra-down db-up db-down migrate
+.PHONY: sync lint format test verify test-integration run-api run-worker infra-up infra-down db-up db-down migrate
 
 sync:
 	uv sync --locked
@@ -9,12 +9,15 @@ sync:
 lint:
 	$(UV_RUN) ruff check .
 	$(UV_RUN) ruff format --check .
+	$(UV_RUN) mypy src tests
 
 format:
 	$(UV_RUN) ruff format .
 
 test:
 	$(UV_RUN) pytest tests/unit
+
+verify: lint test
 
 test-integration:
 	$(UV_RUN) pytest tests/integration
