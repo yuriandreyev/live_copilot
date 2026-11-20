@@ -24,7 +24,11 @@ from copilot_contracts.events import (
     TranscriptFinal,
     TranscriptInterim,
 )
-from transcription.audio import SAMPLE_BYTES, SAMPLE_RATE, SpeechRecognizer
+from transcription.application.ports.audio import (
+    SAMPLE_BYTES,
+    SAMPLE_RATE,
+    SpeechRecognizer,
+)
 
 MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
 

@@ -18,7 +18,7 @@ from api.presentation.health import router as health_router
 from api.presentation.sessions import register_session_routes
 from api.presentation.websocket import websocket_routes
 from api.settings import Settings
-from transcription.fake_asr import FakeSpeechRecognizer
+from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 
 
 class JsonFormatter(logging.Formatter):
