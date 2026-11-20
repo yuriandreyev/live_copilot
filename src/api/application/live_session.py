@@ -2,12 +2,11 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
 from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
-from api.application.ports import SessionDetails
+from api.application.ports.live_session import LiveSessionStore
 from api.domain.enums import SessionStatus
 from api.domain.session import Session
 from copilot_contracts.events import (
@@ -33,13 +32,6 @@ from transcription.application.ports.audio import (
 MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
 
 logger = logging.getLogger(__name__)
-
-
-class LiveSessionStore(Protocol):
-    async def get(self, session_id: UUID) -> SessionDetails | None: ...
-    async def transition(
-        self, session_id: UUID, previous: SessionStatus, target: SessionStatus
-    ) -> bool: ...
 
 
 class ClientDisconnected(Exception):
