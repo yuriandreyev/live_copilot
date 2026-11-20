@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
-from api.application.audio import MAX_FRAME_BYTES, SAMPLE_BYTES, SpeechRecognizer
 from api.application.ports import SessionDetails
 from api.domain.enums import SessionStatus
 from api.domain.session import Session
@@ -25,6 +24,9 @@ from copilot_contracts.events import (
     TranscriptFinal,
     TranscriptInterim,
 )
+from transcription.audio import SAMPLE_BYTES, SAMPLE_RATE, SpeechRecognizer
+
+MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
 
 logger = logging.getLogger(__name__)
 

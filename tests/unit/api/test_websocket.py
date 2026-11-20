@@ -8,14 +8,13 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient, WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
-from api.application.audio import MAX_FRAME_BYTES
-from api.application.live_session import LiveSessionGateway
+from api.application.live_session import MAX_FRAME_BYTES, LiveSessionGateway
 from api.application.ports import SessionDetails
 from api.domain.enums import SessionStatus
-from api.infrastructure.fake_asr import FakeSpeechRecognizer
 from api.presentation.health import router as health_router
 from api.presentation.websocket import websocket_routes
 from copilot_contracts.events import TranscriptWindow
+from transcription.fake_asr import FakeSpeechRecognizer
 
 FRAME_1 = b"\x01\x00" * 1600
 FRAME_2 = b"\xff\xff" * 1600

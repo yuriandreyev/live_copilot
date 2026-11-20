@@ -12,13 +12,13 @@ from api.application.use_cases.sessions.create_session import CreateSession
 from api.application.use_cases.sessions.get_report import GetReport
 from api.application.use_cases.sessions.get_session import GetSession
 from api.application.use_cases.sessions.get_transcript import GetTranscript
-from api.infrastructure.fake_asr import FakeSpeechRecognizer
 from api.infrastructure.storage.database import build_engine
 from api.infrastructure.storage.sessions import PostgresSessionRepository
 from api.presentation.health import router as health_router
 from api.presentation.sessions import register_session_routes
 from api.presentation.websocket import websocket_routes
 from api.settings import Settings
+from transcription.fake_asr import FakeSpeechRecognizer
 
 
 class JsonFormatter(logging.Formatter):

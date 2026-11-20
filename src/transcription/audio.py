@@ -4,7 +4,6 @@ from copilot_contracts.events import FinalizedUtterance, TranscriptWindow
 
 SAMPLE_RATE = 16_000
 SAMPLE_BYTES = 2
-MAX_FRAME_BYTES = SAMPLE_RATE * SAMPLE_BYTES // 10
 
 
 class SpeechRecognizer(Protocol):
