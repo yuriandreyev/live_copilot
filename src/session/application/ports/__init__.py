@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from api.domain.enums import SessionStatus
-from api.domain.session import Session
+from session.domain.enums import SessionStatus
+from session.domain.session import Session
 
 
 @dataclass(frozen=True)

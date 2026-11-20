@@ -1,8 +1,8 @@
 from typing import Protocol
 from uuid import UUID
 
-from api.application.ports import SessionDetails
-from api.domain.enums import SessionStatus
+from session.application.ports import SessionDetails
+from session.domain.enums import SessionStatus
 
 
 class LiveSessionStore(Protocol):

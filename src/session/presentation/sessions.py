@@ -4,13 +4,13 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from api.application.ports import SessionDetails, SessionReport, SessionTranscript
-from api.application.use_cases.sessions.create_session import CreateSession
-from api.application.use_cases.sessions.errors import SessionNotFound
-from api.application.use_cases.sessions.get_report import GetReport
-from api.application.use_cases.sessions.get_session import GetSession
-from api.application.use_cases.sessions.get_transcript import GetTranscript
-from api.domain.enums import SessionStatus
+from session.application.ports import SessionDetails, SessionReport, SessionTranscript
+from session.application.use_cases.sessions.create_session import CreateSession
+from session.application.use_cases.sessions.errors import SessionNotFound
+from session.application.use_cases.sessions.get_report import GetReport
+from session.application.use_cases.sessions.get_session import GetSession
+from session.application.use_cases.sessions.get_transcript import GetTranscript
+from session.domain.enums import SessionStatus
 
 
 class SessionCreated(BaseModel):

@@ -1,7 +1,7 @@
 from sqlalchemy import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from api.settings import Settings
+from bootstrap.settings import Settings
 
 
 def database_url(settings: Settings) -> URL:

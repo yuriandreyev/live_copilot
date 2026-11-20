@@ -11,18 +11,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from api.domain.session import Session
-from api.infrastructure.storage.database import build_engine, database_url
-from api.infrastructure.storage.schema import (
+from bootstrap.main import create_app
+from bootstrap.settings import Settings
+from session.domain.session import Session
+from session.infrastructure.storage.database import build_engine, database_url
+from session.infrastructure.storage.schema import (
     outbox_events,
     recommendations,
     session_summaries,
     sessions,
     utterances,
 )
-from api.infrastructure.storage.sessions import PostgresSessionRepository
-from api.main import create_app
-from api.settings import Settings
+from session.infrastructure.storage.sessions import PostgresSessionRepository
 
 
 async def administer_database(settings: Settings, statement: str) -> None:

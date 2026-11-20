@@ -4,16 +4,16 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.application.ports import (
+from session.application.ports import (
     SessionDetails,
     SessionReport,
     SessionTranscript,
     StoredRecommendation,
     StoredUtterance,
 )
-from api.domain.enums import SessionStatus
-from api.domain.session import Session
-from api.infrastructure.storage.schema import (
+from session.domain.enums import SessionStatus
+from session.domain.session import Session
+from session.infrastructure.storage.schema import (
     recommendations,
     session_summaries,
     sessions,

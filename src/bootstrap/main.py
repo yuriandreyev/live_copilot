@@ -7,17 +7,17 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from api.application.live_session import LiveSessionGateway
-from api.application.use_cases.sessions.create_session import CreateSession
-from api.application.use_cases.sessions.get_report import GetReport
-from api.application.use_cases.sessions.get_session import GetSession
-from api.application.use_cases.sessions.get_transcript import GetTranscript
-from api.infrastructure.storage.database import build_engine
-from api.infrastructure.storage.sessions import PostgresSessionRepository
-from api.presentation.health import router as health_router
-from api.presentation.sessions import register_session_routes
-from api.presentation.websocket import websocket_routes
-from api.settings import Settings
+from bootstrap.health import router as health_router
+from bootstrap.settings import Settings
+from session.application.live_session import LiveSessionGateway
+from session.application.use_cases.sessions.create_session import CreateSession
+from session.application.use_cases.sessions.get_report import GetReport
+from session.application.use_cases.sessions.get_session import GetSession
+from session.application.use_cases.sessions.get_transcript import GetTranscript
+from session.infrastructure.storage.database import build_engine
+from session.infrastructure.storage.sessions import PostgresSessionRepository
+from session.presentation.sessions import register_session_routes
+from session.presentation.websocket import websocket_routes
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 
 

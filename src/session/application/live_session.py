@@ -6,9 +6,6 @@ from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
-from api.application.ports.live_session import LiveSessionStore
-from api.domain.enums import SessionStatus
-from api.domain.session import Session
 from copilot_contracts.events import (
     CaptureErrorEvent,
     CaptureErrorPayload,
@@ -23,6 +20,9 @@ from copilot_contracts.events import (
     TranscriptFinal,
     TranscriptInterim,
 )
+from session.application.ports.live_session import LiveSessionStore
+from session.domain.enums import SessionStatus
+from session.domain.session import Session
 from transcription.application.ports.audio import (
     SAMPLE_BYTES,
     SAMPLE_RATE,

@@ -1,5 +1,5 @@
-from api.application.ports import SessionRepository
-from api.domain.session import Session
+from session.application.ports import SessionRepository
+from session.domain.session import Session
 
 
 class CreateSession:

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from api.main import create_app
+from bootstrap.main import create_app
 
 REQUIRED_SETTINGS = {
     "POSTGRES_DB": "test",

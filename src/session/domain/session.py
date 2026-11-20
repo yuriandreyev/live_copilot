@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from api.domain.enums import SessionStatus
+from session.domain.enums import SessionStatus
 
 _ALLOWED_TRANSITIONS = {
     SessionStatus.CREATED: frozenset({SessionStatus.LIVE}),

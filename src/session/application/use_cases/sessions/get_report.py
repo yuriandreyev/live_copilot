@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from api.application.ports import SessionReport, SessionRepository
-from api.application.use_cases.sessions.errors import SessionNotFound
+from session.application.ports import SessionReport, SessionRepository
+from session.application.use_cases.sessions.errors import SessionNotFound
 
 
 class GetReport:

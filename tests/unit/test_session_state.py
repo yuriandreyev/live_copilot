@@ -2,8 +2,8 @@ from itertools import product
 
 import pytest
 
-from api.domain.enums import SessionStatus
-from api.domain.session import InvalidSessionTransition, Session
+from session.domain.enums import SessionStatus
+from session.domain.session import InvalidSessionTransition, Session
 
 REACHABLE_PATHS = {
     SessionStatus.CREATED: (),

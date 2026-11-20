@@ -3,12 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from api.application.live_session import (
+from copilot_contracts.events import ClientCommand, ServerEvent, client_command_adapter
+from session.application.live_session import (
     CaptureRejected,
     ClientDisconnected,
     LiveSessionGateway,
 )
-from copilot_contracts.events import ClientCommand, ServerEvent, client_command_adapter
 
 
 def websocket_routes(gateway: LiveSessionGateway) -> APIRouter:
