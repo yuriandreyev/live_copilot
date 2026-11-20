@@ -23,6 +23,7 @@ LEGAL_TRANSITIONS = {
     (SessionStatus.STOPPING, SessionStatus.COMPLETED),
     (SessionStatus.LIVE, SessionStatus.INTERRUPTED),
     (SessionStatus.LIVE, SessionStatus.FAILED),
+    (SessionStatus.STOPPING, SessionStatus.INTERRUPTED),
     (SessionStatus.STOPPING, SessionStatus.FAILED),
 }
 

@@ -99,6 +99,25 @@ class SessionCompleted(EventEnvelope):
     payload: EmptyPayload = Field(default_factory=EmptyPayload)
 
 
+class SessionStatusPayload(Contract):
+    status: Literal["live", "stopping"]
+
+
+class SessionStatusChanged(EventEnvelope):
+    event_type: Literal["session.status"]
+    payload: SessionStatusPayload
+
+
+class CaptureErrorPayload(Contract):
+    code: NonBlank
+    message: NonBlank
+
+
+class CaptureErrorEvent(EventEnvelope):
+    event_type: Literal["session.error", "session.overloaded"]
+    payload: CaptureErrorPayload
+
+
 type DurableEvent = Annotated[
     TranscriptFinal | RecommendationCreated | SessionCompleted,
     Field(discriminator="event_type"),
@@ -108,7 +127,9 @@ type ServerEvent = Annotated[
     | TranscriptFinal
     | AnalysisCompleted
     | RecommendationCreated
-    | SessionCompleted,
+    | SessionCompleted
+    | SessionStatusChanged
+    | CaptureErrorEvent,
     Field(discriminator="event_type"),
 ]
 durable_event_adapter: TypeAdapter[DurableEvent] = TypeAdapter(DurableEvent)

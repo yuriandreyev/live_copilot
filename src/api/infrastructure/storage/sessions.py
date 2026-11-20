@@ -31,6 +31,27 @@ class PostgresSessionRepository:
                 sessions.insert().values(id=session.id, status=session.status.value)
             )
 
+    async def transition(
+        self, session_id: UUID, previous: SessionStatus, target: SessionStatus
+    ) -> bool:
+        values: dict[str, object] = {"status": target.value}
+        if target is SessionStatus.LIVE:
+            values["started_at"] = sa.func.now()
+        if target in (
+            SessionStatus.COMPLETED,
+            SessionStatus.INTERRUPTED,
+            SessionStatus.FAILED,
+        ):
+            values["ended_at"] = sa.func.now()
+        query = (
+            sessions.update()
+            .where(sessions.c.id == session_id, sessions.c.status == previous.value)
+            .values(**values)
+            .returning(sessions.c.id)
+        )
+        async with self._session_factory.begin() as db:
+            return (await db.scalar(query)) is not None
+
     async def get(self, session_id: UUID) -> SessionDetails | None:
         summary_exists = (
             sa.select(session_summaries.c.session_id)

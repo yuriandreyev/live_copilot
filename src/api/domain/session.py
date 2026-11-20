@@ -7,7 +7,9 @@ _ALLOWED_TRANSITIONS = {
     SessionStatus.LIVE: frozenset(
         {SessionStatus.STOPPING, SessionStatus.INTERRUPTED, SessionStatus.FAILED}
     ),
-    SessionStatus.STOPPING: frozenset({SessionStatus.COMPLETED, SessionStatus.FAILED}),
+    SessionStatus.STOPPING: frozenset(
+        {SessionStatus.COMPLETED, SessionStatus.INTERRUPTED, SessionStatus.FAILED}
+    ),
     SessionStatus.COMPLETED: frozenset(),
     SessionStatus.INTERRUPTED: frozenset(),
     SessionStatus.FAILED: frozenset(),
@@ -19,8 +21,8 @@ class InvalidSessionTransition(ValueError):
 
 
 class Session:
-    def __init__(self) -> None:
-        self._id = uuid4()
+    def __init__(self, session_id: UUID | None = None) -> None:
+        self._id = session_id if session_id is not None else uuid4()
         self._status = SessionStatus.CREATED
         self._sequence = 0
 

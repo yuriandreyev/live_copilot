@@ -7,14 +7,17 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from api.application.live_session import LiveSessionGateway
 from api.application.use_cases.sessions.create_session import CreateSession
 from api.application.use_cases.sessions.get_report import GetReport
 from api.application.use_cases.sessions.get_session import GetSession
 from api.application.use_cases.sessions.get_transcript import GetTranscript
+from api.infrastructure.fake_asr import FakeSpeechRecognizer
 from api.infrastructure.storage.database import build_engine
 from api.infrastructure.storage.sessions import PostgresSessionRepository
 from api.presentation.health import router as health_router
 from api.presentation.sessions import register_session_routes
+from api.presentation.websocket import websocket_routes
 from api.settings import Settings
 
 
@@ -59,4 +62,7 @@ def create_app() -> FastAPI:
         get_report_use_case=GetReport(repository),
     )
     app.include_router(health_router)
+    app.include_router(
+        websocket_routes(LiveSessionGateway(repository, FakeSpeechRecognizer))
+    )
     return app

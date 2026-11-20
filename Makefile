@@ -20,7 +20,7 @@ test-integration:
 	$(UV_RUN) pytest tests/integration
 
 run-api:
-	$(UV_RUN) uvicorn api.main:create_app --factory --host 127.0.0.1 --port 8000
+	$(UV_RUN) uvicorn api.main:create_app --factory --host 127.0.0.1 --port 8000 --ws websockets --ws-max-size 16384 --ws-max-queue 4
 
 run-worker:
 	$(UV_RUN) python -m worker

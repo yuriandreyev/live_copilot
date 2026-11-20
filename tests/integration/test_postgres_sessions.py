@@ -239,3 +239,44 @@ def test_duplicate_sequence_rolls_back_entire_failed_transaction(
             await engine.dispose()
 
     asyncio.run(check())
+
+
+def test_websocket_updates_persisted_session_state(database_settings: Settings) -> None:
+    with TestClient(create_app()) as client:
+        session_id = client.post("/api/sessions").json()["session_id"]
+        url = f"/api/sessions/{session_id}"
+        envelope = {"schema_version": 1, "session_id": session_id}
+
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            socket.send_json({**envelope, "event_type": "capture.start"})
+            assert socket.receive_json()["payload"]["status"] == "live"
+            details = client.get(url).json()
+            assert details["status"] == "live"
+            assert details["started_at"] is not None
+            assert details["ended_at"] is None
+
+            socket.send_bytes(b"\x01\x00" * 1600)
+            interim = socket.receive_json()
+            assert interim["event_type"] == "transcript.interim"
+            assert interim["payload"]["end_ms"] == 100
+
+            socket.send_json({**envelope, "event_type": "capture.stop"})
+            assert socket.receive_json()["payload"]["status"] == "stopping"
+            assert socket.receive_json()["event_type"] == "transcript.final"
+            assert socket.receive_json()["event_type"] == "session.completed"
+
+        details = client.get(url).json()
+        assert details["status"] == "completed"
+        assert details["ended_at"] is not None
+        assert client.get(f"{url}/transcript").json()["utterances"] == []
+
+        interrupted = client.post("/api/sessions").json()["session_id"]
+        with client.websocket_connect(f"/ws/sessions/{interrupted}") as socket:
+            socket.send_json(
+                {**envelope, "session_id": interrupted, "event_type": "capture.start"}
+            )
+            assert socket.receive_json()["payload"]["status"] == "live"
+
+        details = client.get(f"/api/sessions/{interrupted}").json()
+        assert details["status"] == "interrupted"
+        assert details["ended_at"] is not None
