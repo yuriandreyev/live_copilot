@@ -12,7 +12,9 @@ htmlcov/
 .DS_Store
 .idea/
 scripts/
-.agents/
+.agent/
+AGENTS.md
+PROGRESS.md
 .uv-cache/
 docs/
 # Local runtime data and build outputs
