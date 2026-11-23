@@ -1,10 +1,11 @@
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from agents.public import AgentContext, Recommendation
-from workflows.live_capture.infrastructure.event_types import (
+from workflows.live_capture.event_types import (
     Contract,
     NonBlank,
     PositiveSequence,
@@ -51,6 +52,17 @@ class EventEnvelope(Envelope):
     correlation_id: UUID
     sequence: PositiveSequence
     occurred_at: UtcTimestamp
+
+
+def new_envelope(session_id: UUID, sequence: int) -> EventEnvelope:
+    return EventEnvelope(
+        schema_version=1,
+        event_id=uuid4(),
+        session_id=session_id,
+        correlation_id=session_id,
+        sequence=sequence,
+        occurred_at=datetime.now(UTC),
+    )
 
 
 Milliseconds = Annotated[int, Field(strict=True, ge=0)]

@@ -5,6 +5,7 @@ from typing import Protocol
 from agents.public import AgentContext, Recommendation
 from session.public import SessionStatus
 from transcription.public import TranscriptWindow
+from workflows.live_capture.events import RecommendationCreated, TranscriptFinal
 
 
 class CaptureDisconnected(Exception):
@@ -35,7 +36,12 @@ class AnalysisUpdate:
 
 
 type CaptureUpdate = (
-    SessionStatus | TranscriptWindow | CaptureRejected | AnalysisUpdate | Recommendation
+    SessionStatus
+    | TranscriptWindow
+    | CaptureRejected
+    | AnalysisUpdate
+    | RecommendationCreated
+    | TranscriptFinal
 )
 
 

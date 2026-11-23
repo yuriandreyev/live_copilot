@@ -13,7 +13,12 @@ from bootstrap.health import router as health_router
 from knowledge.faq import FAQ
 from session.application.ports import SessionDetails
 from session.domain.enums import SessionStatus
-from session.public import SessionLifecycle
+from session.public import (
+    OutboxEvent,
+    SessionLifecycle,
+    StoredRecommendation,
+    StoredUtterance,
+)
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 from transcription.public import FinalizedUtterance, TranscriptWindow
 from workflows.live_capture.infrastructure.websocket import (
@@ -41,6 +46,20 @@ class MemorySessionStore:
         if status is None:
             return None
         return SessionDetails(session_id, status, datetime.now(UTC), None, None, False)
+
+    async def record_utterance(
+        self, session_id: UUID, utterance: StoredUtterance, event: OutboxEvent
+    ) -> bool:
+        return True
+
+    async def record_recommendation(
+        self,
+        session_id: UUID,
+        utterance_id: UUID,
+        recommendation: StoredRecommendation,
+        event: OutboxEvent,
+    ) -> bool:
+        return True
 
     async def transition(
         self, session_id: UUID, previous: SessionStatus, target: SessionStatus
@@ -92,6 +111,7 @@ def make_client(
             LiveCapture(
                 SessionLifecycle(store),
                 lambda: recognizer,
+                store,
                 audio_capacity=audio_capacity,
                 flush_timeout=flush_timeout,
                 analysis=analysis,
@@ -135,7 +155,7 @@ def test_capture_accepts_an_in_memory_transport() -> None:
         async def publish(self, sequence: int, update: CaptureUpdate) -> None:
             updates.append((sequence, update))
 
-    live_capture = LiveCapture(SessionLifecycle(store), FakeSpeechRecognizer)
+    live_capture = LiveCapture(SessionLifecycle(store), FakeSpeechRecognizer, store)
     outcome = asyncio.run(live_capture.run(session_id, MemoryTransport()))
 
     assert outcome is CaptureOutcome.COMPLETED

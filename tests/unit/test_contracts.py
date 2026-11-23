@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agents.public import Recommendation, agent_context_adapter
-from workflows.live_capture.infrastructure.events import (
+from workflows.live_capture.events import (
     CaptureStart,
     CaptureStop,
     RecommendationCreated,

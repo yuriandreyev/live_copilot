@@ -60,7 +60,7 @@ Run `UV_CACHE_DIR=.uv-cache uv run --locked --no-sync python -m bootstrap.llm_sm
 to verify the duplicate-notification scenario against the running model.
 Set `LLM_ENDPOINT` and `LLM_MODEL` in the command environment to override the
 smoke test defaults. Live recommendations appear in the browser during
-capture. Database persistence for them is scheduled for WP08.
+capture and are available afterward from the session transcript endpoint.
 
 ## Developer commands
 
@@ -110,5 +110,8 @@ five seconds to drain through the recognizer. Disconnecting before completion
 marks the session interrupted.
 
 The recognizer revises the current interim transcript and finalizes utterances
-after a pause, the maximum utterance length, or a stop command. The database
-currently records the session lifecycle. Transcript persistence arrives in WP08.
+after a pause, the maximum utterance length, or a stop command. The API saves
+each finalized utterance or recommendation together with its outbox event
+before sending the WebSocket update. The transcript endpoint returns
+committed updates in order. If a write fails, the socket reports
+`session.error` with code `persistence_failed`.

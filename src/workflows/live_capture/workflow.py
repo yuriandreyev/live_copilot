@@ -7,9 +7,23 @@ from uuid import UUID
 
 from anyio import CancelScope
 
-from agents.public import ANALYSIS_TIMEOUT, Recommendation, SupportAnalysis
-from session.public import SessionLifecycle, SessionStatus
+from agents.public import ANALYSIS_TIMEOUT, SupportAnalysis
+from session.public import (
+    CaptureRecordStore,
+    CaptureWriteError,
+    OutboxEvent,
+    SessionLifecycle,
+    SessionStatus,
+    StoredRecommendation,
+    StoredUtterance,
+)
 from transcription.public import FinalizedUtterance, SpeechRecognizer, TranscriptWindow
+from workflows.live_capture.events import (
+    RecommendationCreated,
+    TranscriptFinal,
+    TranscriptFinalPayload,
+    new_envelope,
+)
 from workflows.live_capture.ports import (
     AnalysisUpdate,
     CaptureCommand,
@@ -21,6 +35,10 @@ from workflows.live_capture.ports import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _outbox_event(event: TranscriptFinal | RecommendationCreated) -> OutboxEvent:
+    return OutboxEvent(event.event_id, event.event_type, event.model_dump(mode="json"))
 
 
 @dataclass
@@ -35,6 +53,7 @@ class LiveCapture:
         self,
         lifecycle: SessionLifecycle,
         recognizer_factory: Callable[[], SpeechRecognizer],
+        records: CaptureRecordStore,
         *,
         audio_capacity: int = 30,
         flush_timeout: float = 5,
@@ -42,6 +61,7 @@ class LiveCapture:
     ) -> None:
         self._lifecycle = lifecycle
         self._recognizer_factory = recognizer_factory
+        self._records = records
         self._audio_capacity = audio_capacity
         self._flush_timeout = flush_timeout
         self._analysis = analysis
@@ -91,6 +111,14 @@ class LiveCapture:
         except CaptureRejected as error:
             await self._terminate(session, SessionStatus.FAILED)
             return await self._send_error(session, transport, error)
+        except CaptureWriteError:
+            logger.warning("session.persistence_failed session_id=%s", session.id)
+            await self._terminate(session, SessionStatus.FAILED)
+            failure = CaptureRejected(
+                "persistence_failed",
+                "Capture ended because a finalized update could not be saved.",
+            )
+            return await self._send_error(session, transport, failure)
         except Exception:
             logger.exception("session.capture_failed session_id=%s", session.id)
             await self._terminate(session, SessionStatus.FAILED)
@@ -165,14 +193,6 @@ class LiveCapture:
             while True:
                 event = await outbound.get()
                 try:
-                    update = event[1]
-                    if isinstance(update, AnalysisUpdate):
-                        update = update.recommendation
-                    if (
-                        isinstance(update, Recommendation)
-                        and update.context_version != version
-                    ):
-                        continue
                     async with asyncio.timeout(2):
                         await transport.publish(*event)
                 finally:
@@ -212,15 +232,39 @@ class LiveCapture:
         async def emit_transcript(result: TranscriptWindow) -> None:
             nonlocal latest, transcript, version
             async with emission:
-                if self._analysis is not None and isinstance(
-                    result, FinalizedUtterance
+                sequence = next(session.sequence)
+                if not isinstance(result, FinalizedUtterance):
+                    await outbound.put((sequence, result))
+                    return
+                event = TranscriptFinal(
+                    **new_envelope(session.id, sequence).model_dump(),
+                    event_type="transcript.final",
+                    payload=TranscriptFinalPayload(
+                        utterance_id=result.utterance_id,
+                        start_ms=result.start_ms,
+                        end_ms=result.end_ms,
+                        text=result.text,
+                    ),
+                )
+                stored = StoredUtterance(
+                    result.utterance_id,
+                    sequence,
+                    result.start_ms,
+                    result.end_ms,
+                    result.text,
+                    (),
+                )
+                if not await self._records.record_utterance(
+                    session.id, stored, _outbox_event(event)
                 ):
+                    return
+                if self._analysis is not None:
                     latest = result
                     version += 1
                     transcript = f"{transcript}\n{result.text}".strip()[-2000:]
                     analyzed.clear()
                     pending.set()
-                await outbound.put((next(session.sequence), result))
+                await outbound.put((sequence, event))
 
         async def analyze_latest() -> None:
             assert self._analysis is not None
@@ -238,14 +282,38 @@ class LiveCapture:
                 async with emission:
                     if requested != version:
                         continue
-                    if result.context is not None:
-                        await outbound.put(
-                            (
-                                next(session.sequence),
-                                AnalysisUpdate(result.context, result.recommendation),
+                    recommendation = result.recommendation
+                    context_sequence = (
+                        next(session.sequence) if result.context is not None else None
+                    )
+                    sequence = next(session.sequence)
+                    event = RecommendationCreated(
+                        **new_envelope(session.id, sequence).model_dump(),
+                        event_type="recommendation.created",
+                        payload=recommendation,
+                    )
+                    stored = StoredRecommendation(
+                        recommendation.recommendation_id,
+                        recommendation.context_version,
+                        recommendation.action,
+                        recommendation.rationale,
+                        recommendation.faq_ids,
+                        recommendation.prompt_version,
+                    )
+                    if await self._records.record_recommendation(
+                        session.id,
+                        recommendation.utterance_id,
+                        stored,
+                        _outbox_event(event),
+                    ):
+                        if result.context is not None and context_sequence is not None:
+                            await outbound.put(
+                                (
+                                    context_sequence,
+                                    AnalysisUpdate(result.context, recommendation),
+                                )
                             )
-                        )
-                    await outbound.put((next(session.sequence), result.recommendation))
+                        await outbound.put((sequence, event))
                     analyzed.set()
 
         async def process_frames() -> None:

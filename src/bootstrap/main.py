@@ -20,6 +20,7 @@ from session.application.use_cases.session.create_session import CreateSession
 from session.application.use_cases.session.get_report import GetReport
 from session.application.use_cases.session.get_session import GetSession
 from session.application.use_cases.session.get_transcript import GetTranscript
+from session.infrastructure.storage.capture_records import PostgresCaptureRecordStore
 from session.infrastructure.storage.database import build_engine
 from session.infrastructure.storage.sessions import PostgresSessionRepository
 from session.presentation.sessions import register_session_routes
@@ -54,7 +55,9 @@ def create_app() -> FastAPI:
     logger.info("api.configured")
 
     engine = build_engine(settings)
-    repository = PostgresSessionRepository(async_sessionmaker(engine))
+    session_factory = async_sessionmaker(engine)
+    repository = PostgresSessionRepository(session_factory)
+    capture_records = PostgresCaptureRecordStore(session_factory)
     asr: FasterWhisper | None = None
     llm_client = httpx.AsyncClient(trust_env=False, timeout=12)
     analysis = (
@@ -104,7 +107,12 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(
         websocket_routes(
-            LiveCapture(SessionLifecycle(repository), new_recognizer, analysis=analysis)
+            LiveCapture(
+                SessionLifecycle(repository),
+                new_recognizer,
+                capture_records,
+                analysis=analysis,
+            )
         )
     )
     web_directory = Path(__file__).with_name("web")

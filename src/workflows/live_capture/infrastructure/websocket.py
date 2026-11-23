@@ -1,34 +1,30 @@
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from agents.public import Recommendation
 from session.public import SessionStatus
 from transcription.public import (
     SAMPLE_BYTES,
     SAMPLE_RATE,
-    FinalizedUtterance,
     TranscriptWindow,
 )
-from workflows.live_capture.infrastructure.events import (
+from workflows.live_capture.events import (
     AnalysisCompleted,
     AnalysisPayload,
     CaptureErrorEvent,
     CaptureErrorPayload,
     CaptureStart,
-    EventEnvelope,
     RecommendationCreated,
     ServerEvent,
     SessionCompleted,
     SessionStatusChanged,
     SessionStatusPayload,
     TranscriptFinal,
-    TranscriptFinalPayload,
     TranscriptInterim,
     TranscriptInterimPayload,
     client_command_adapter,
+    new_envelope,
 )
 from workflows.live_capture.ports import (
     AnalysisUpdate,
@@ -47,20 +43,16 @@ _ERROR_CLOSE_CODES = {
     "audio_overload": 1013,
     "capture_failed": 1011,
     "flush_timeout": 1011,
+    "persistence_failed": 1011,
 }
 
 
 def _server_event(
     session_id: UUID, sequence: int, update: CaptureUpdate
 ) -> ServerEvent:
-    envelope = EventEnvelope(
-        schema_version=1,
-        event_id=uuid4(),
-        session_id=session_id,
-        correlation_id=session_id,
-        sequence=sequence,
-        occurred_at=datetime.now(UTC),
-    ).model_dump()
+    if isinstance(update, (TranscriptFinal, RecommendationCreated)):
+        return update
+    envelope = new_envelope(session_id, sequence).model_dump()
 
     if isinstance(update, CaptureRejected):
         return CaptureErrorEvent(
@@ -78,21 +70,6 @@ def _server_event(
                 utterance_id=update.recommendation.utterance_id,
                 context_version=update.recommendation.context_version,
                 context=update.context,
-            ),
-        )
-    if isinstance(update, Recommendation):
-        return RecommendationCreated(
-            **envelope, event_type="recommendation.created", payload=update
-        )
-    if isinstance(update, FinalizedUtterance):
-        return TranscriptFinal(
-            **envelope,
-            event_type="transcript.final",
-            payload=TranscriptFinalPayload(
-                utterance_id=update.utterance_id,
-                start_ms=update.start_ms,
-                end_ms=update.end_ms,
-                text=update.text,
             ),
         )
     if isinstance(update, TranscriptWindow):

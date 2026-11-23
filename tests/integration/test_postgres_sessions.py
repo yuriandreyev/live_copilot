@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,9 +12,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import workflows.live_capture.workflow as capture_workflow
+from agents.infrastructure.llama_cpp import LlamaCpp
 from bootstrap.main import create_app
 from bootstrap.settings import Settings
 from session.domain.session import Session
+from session.infrastructure.storage.capture_records import PostgresCaptureRecordStore
 from session.infrastructure.storage.database import build_engine, database_url
 from session.infrastructure.storage.schema import (
     outbox_events,
@@ -23,6 +27,9 @@ from session.infrastructure.storage.schema import (
     utterances,
 )
 from session.infrastructure.storage.sessions import PostgresSessionRepository
+from session.public import OutboxEvent, StoredRecommendation
+from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
+from transcription.public import FinalizedUtterance
 
 
 async def administer_database(settings: Settings, statement: str) -> None:
@@ -261,16 +268,20 @@ def test_websocket_updates_persisted_session_state(database_settings: Settings) 
             interim = socket.receive_json()
             assert interim["event_type"] == "transcript.interim"
             assert interim["payload"]["end_ms"] == 100
+            assert client.get(f"{url}/transcript").json()["utterances"] == []
 
             socket.send_json({**envelope, "event_type": "capture.stop"})
             assert socket.receive_json()["payload"]["status"] == "stopping"
-            assert socket.receive_json()["event_type"] == "transcript.final"
+            final = socket.receive_json()
+            assert final["event_type"] == "transcript.final"
             assert socket.receive_json()["event_type"] == "session.completed"
 
         details = client.get(url).json()
         assert details["status"] == "completed"
         assert details["ended_at"] is not None
-        assert client.get(f"{url}/transcript").json()["utterances"] == []
+        assert client.get(f"{url}/transcript").json()["utterances"] == [
+            {**final["payload"], "sequence": final["sequence"], "recommendations": []}
+        ]
 
         interrupted = client.post("/api/sessions").json()["session_id"]
         with client.websocket_connect(f"/ws/sessions/{interrupted}") as socket:
@@ -282,3 +293,194 @@ def test_websocket_updates_persisted_session_state(database_settings: Settings) 
         details = client.get(f"/api/sessions/{interrupted}").json()
         assert details["status"] == "interrupted"
         assert details["ended_at"] is not None
+
+
+class DuplicateRecognizer(FakeSpeechRecognizer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.final = FinalizedUtterance(
+            utterance_id=uuid4(),
+            start_ms=0,
+            end_ms=100,
+            text="We are receiving duplicate API notifications.",
+        )
+
+    async def accept_frame(self, frame: bytes) -> FinalizedUtterance:
+        return self.final
+
+    async def finish(self) -> FinalizedUtterance:
+        return self.final
+
+
+def configure_recommendations(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def complete(self: LlamaCpp, instructions: str, data: str) -> str:
+        if '"transcript"' in data:
+            return (
+                '{"status":"identified","issue":"Duplicate notifications",'
+                '"intent":"Find the cause","confidence":0.95}'
+            )
+        return (
+            '{"action":"Compare event IDs.","rationale":"Repeated delivery can reuse IDs.",'
+            '"faq_ids":["duplicate-notifications"]}'
+        )
+
+    monkeypatch.setenv("LLM_ENABLED", "true")
+    monkeypatch.setattr("bootstrap.main.FakeSpeechRecognizer", DuplicateRecognizer)
+    monkeypatch.setattr(LlamaCpp, "complete", complete)
+
+
+def test_live_records_and_outbox_match_websocket_after_replay(
+    database_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_recommendations(monkeypatch)
+
+    with TestClient(create_app()) as client:
+        session_id = client.post("/api/sessions").json()["session_id"]
+        url = f"/api/sessions/{session_id}"
+        command = {"schema_version": 1, "session_id": session_id}
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            socket.send_json({**command, "event_type": "capture.start"})
+            assert socket.receive_json()["payload"]["status"] == "live"
+            socket.send_bytes(b"\x01\x00")
+            final = socket.receive_json()
+            assert final["event_type"] == "transcript.final"
+            assert (
+                client.get(f"{url}/transcript").json()["utterances"][0]["text"]
+                == (final["payload"]["text"])
+            )
+
+            assert socket.receive_json()["event_type"] == "analysis.completed"
+            recommendation = socket.receive_json()
+            assert recommendation["event_type"] == "recommendation.created"
+            assert recommendation["payload"]["faq_ids"] == ["duplicate-notifications"]
+
+            # Stop replays the same final utterance from the recognizer's flush.
+            socket.send_json({**command, "event_type": "capture.stop"})
+            assert socket.receive_json()["payload"]["status"] == "stopping"
+            assert socket.receive_json()["event_type"] == "session.completed"
+
+        async def replay_recommendation_and_check_outbox() -> None:
+            engine = build_engine(database_settings)
+            factory = async_sessionmaker(engine)
+            try:
+                payload = recommendation["payload"]
+                event = OutboxEvent(
+                    UUID(recommendation["event_id"]),
+                    recommendation["event_type"],
+                    recommendation,
+                )
+                inserted = await PostgresCaptureRecordStore(
+                    factory
+                ).record_recommendation(
+                    UUID(session_id),
+                    UUID(payload["utterance_id"]),
+                    StoredRecommendation(
+                        UUID(payload["recommendation_id"]),
+                        payload["context_version"],
+                        payload["action"],
+                        payload["rationale"],
+                        tuple(payload["faq_ids"]),
+                        payload["prompt_version"],
+                    ),
+                    event,
+                )
+                assert inserted is False
+                async with factory() as db:
+                    rows = (
+                        await db.execute(
+                            sa.select(outbox_events).where(
+                                outbox_events.c.payload["session_id"].astext
+                                == session_id
+                            )
+                        )
+                    ).all()
+                    assert {str(row.event_id): row.payload for row in rows} == {
+                        event["event_id"]: event for event in (final, recommendation)
+                    }
+                    assert sorted(row.type for row in rows) == [
+                        "recommendation.created",
+                        "transcript.final",
+                    ]
+                    assert all(row.published_at is None for row in rows)
+            finally:
+                await engine.dispose()
+
+        asyncio.run(replay_recommendation_and_check_outbox())
+        stored_recommendation = dict(recommendation["payload"])
+        assert (
+            stored_recommendation.pop("utterance_id")
+            == final["payload"]["utterance_id"]
+        )
+        assert client.get(f"{url}/transcript").json()["utterances"] == [
+            {
+                **final["payload"],
+                "sequence": final["sequence"],
+                "recommendations": [stored_recommendation],
+            }
+        ]
+
+
+@pytest.mark.parametrize("failed_type", ["transcript.final", "recommendation.created"])
+def test_outbox_failure_rolls_back_record_and_emits_persistence_error(
+    database_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_type: str,
+) -> None:
+    configure_recommendations(monkeypatch)
+    occupied_id = uuid4()
+
+    async def seed_outbox_id() -> None:
+        engine = build_engine(database_settings)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    outbox_events.insert().values(
+                        event_id=occupied_id,
+                        type="test",
+                        payload={},
+                    )
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed_outbox_id())
+    original = capture_workflow._outbox_event
+
+    def collide(
+        event: capture_workflow.TranscriptFinal
+        | capture_workflow.RecommendationCreated,
+    ) -> OutboxEvent:
+        outbox = original(event)
+        return (
+            replace(outbox, event_id=occupied_id)
+            if event.event_type == failed_type
+            else outbox
+        )
+
+    monkeypatch.setattr(capture_workflow, "_outbox_event", collide)
+    with TestClient(create_app()) as client:
+        session_id = client.post("/api/sessions").json()["session_id"]
+        url = f"/api/sessions/{session_id}"
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            socket.send_json(
+                {
+                    "schema_version": 1,
+                    "session_id": session_id,
+                    "event_type": "capture.start",
+                }
+            )
+            assert socket.receive_json()["payload"]["status"] == "live"
+            socket.send_bytes(b"\x01\x00")
+            if failed_type == "recommendation.created":
+                assert socket.receive_json()["event_type"] == "transcript.final"
+            error = socket.receive_json()
+            assert error["event_type"] == "session.error"
+            assert error["payload"]["code"] == "persistence_failed"
+
+        rows = client.get(f"{url}/transcript").json()["utterances"]
+        if failed_type == "transcript.final":
+            assert rows == []
+        else:
+            assert len(rows) == 1 and rows[0]["recommendations"] == []
+        assert client.get(url).json()["status"] == "failed"
