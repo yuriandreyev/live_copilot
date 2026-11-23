@@ -7,9 +7,11 @@ from uuid import UUID
 
 from anyio import CancelScope
 
+from agents.public import ANALYSIS_TIMEOUT, Recommendation, SupportAnalysis
 from session.public import SessionLifecycle, SessionStatus
-from transcription.public import SpeechRecognizer
+from transcription.public import FinalizedUtterance, SpeechRecognizer, TranscriptWindow
 from workflows.live_capture.ports import (
+    AnalysisUpdate,
     CaptureCommand,
     CaptureDisconnected,
     CaptureOutcome,
@@ -36,11 +38,13 @@ class LiveCapture:
         *,
         audio_capacity: int = 30,
         flush_timeout: float = 5,
+        analysis: SupportAnalysis | None = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._recognizer_factory = recognizer_factory
         self._audio_capacity = audio_capacity
         self._flush_timeout = flush_timeout
+        self._analysis = analysis
         self._admission = asyncio.Lock()
 
     async def run(
@@ -148,11 +152,27 @@ class LiveCapture:
         audio: asyncio.Queue[bytes | None] = asyncio.Queue(self._audio_capacity + 1)
         outbound: asyncio.Queue[tuple[int, CaptureUpdate]] = asyncio.Queue(8)
         emission = asyncio.Lock()
+        stopping = asyncio.timeout(None)
+        loop = asyncio.get_running_loop()
+        pending = asyncio.Event()
+        analyzed = asyncio.Event()
+        analyzed.set()
+        version = 0
+        transcript = ""
+        latest: FinalizedUtterance | None = None
 
         async def send_events() -> None:
             while True:
                 event = await outbound.get()
                 try:
+                    update = event[1]
+                    if isinstance(update, AnalysisUpdate):
+                        update = update.recommendation
+                    if (
+                        isinstance(update, Recommendation)
+                        and update.context_version != version
+                    ):
+                        continue
                     async with asyncio.timeout(2):
                         await transport.publish(*event)
                 finally:
@@ -174,7 +194,8 @@ class LiveCapture:
                 break
 
             try:
-                async with asyncio.timeout(self._flush_timeout):
+                async with stopping:
+                    stopping.reschedule(loop.time() + self._flush_timeout)
                     await self._transition(session, SessionStatus.STOPPING)
                     async with emission:
                         await outbound.put((next(session.sequence), session.status))
@@ -188,15 +209,57 @@ class LiveCapture:
                     "flush_timeout", "Capture could not flush in time."
                 ) from None
 
+        async def emit_transcript(result: TranscriptWindow) -> None:
+            nonlocal latest, transcript, version
+            async with emission:
+                if self._analysis is not None and isinstance(
+                    result, FinalizedUtterance
+                ):
+                    latest = result
+                    version += 1
+                    transcript = f"{transcript}\n{result.text}".strip()[-2000:]
+                    analyzed.clear()
+                    pending.set()
+                await outbound.put((next(session.sequence), result))
+
+        async def analyze_latest() -> None:
+            assert self._analysis is not None
+            while True:
+                await pending.wait()
+                requested = version
+                await asyncio.sleep(0.25)
+                if requested != version:
+                    continue
+                pending.clear()
+                assert latest is not None
+                result = await self._analysis.analyze(
+                    latest.utterance_id, requested, transcript
+                )
+                async with emission:
+                    if requested != version:
+                        continue
+                    if result.context is not None:
+                        await outbound.put(
+                            (
+                                next(session.sequence),
+                                AnalysisUpdate(result.context, result.recommendation),
+                            )
+                        )
+                    await outbound.put((next(session.sequence), result.recommendation))
+                    analyzed.set()
+
         async def process_frames() -> None:
             while (frame := await audio.get()) is not None:
                 result = await recognizer.accept_frame(frame)
                 if result is not None:
-                    async with emission:
-                        await outbound.put((next(session.sequence), result))
+                    await emit_transcript(result)
             result = await recognizer.finish()
             if result is not None:
-                await outbound.put((next(session.sequence), result))
+                await emit_transcript(result)
+            if not analyzed.is_set():
+                # ASR has flushed. Give the latest analysis its own bounded drain window.
+                stopping.reschedule(loop.time() + 2 * ANALYSIS_TIMEOUT + 4)
+                await analyzed.wait()
             await outbound.join()
             await self._transition(session, SessionStatus.COMPLETED)
             await outbound.put((next(session.sequence), session.status))
@@ -206,7 +269,9 @@ class LiveCapture:
         receiver = asyncio.create_task(receive_frames())
         processor = asyncio.create_task(process_frames())
         sender = asyncio.create_task(send_events())
-        tasks = (receiver, sender, processor)
+        tasks = [receiver, sender, processor]
+        if self._analysis is not None:
+            tasks.append(asyncio.create_task(analyze_latest()))
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in tasks:

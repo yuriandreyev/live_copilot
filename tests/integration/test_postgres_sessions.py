@@ -54,6 +54,7 @@ def database_name() -> Iterator[str]:
 @pytest.fixture
 def database_settings(database_name: str, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setenv("ASR_BACKEND", "fake")
+    monkeypatch.setenv("LLM_ENABLED", "false")
     monkeypatch.setenv("POSTGRES_DB", database_name)
     return Settings()  # type: ignore[call-arg]
 

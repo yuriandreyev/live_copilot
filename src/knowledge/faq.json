@@ -1,0 +1,7 @@
+[
+  {"id":"duplicate-notifications","terms":["duplicate","duplicates","duplicated","twice","дубликаты","дублируются","дважды"],"evidence":"Compare the event IDs and delivery attempts of two duplicate notifications. If they share an event ID, check consumer deduplication."},
+  {"id":"event-retries","terms":["retry","retries","backoff","повторы","ретраи"],"evidence":"Check the delivery attempt count and last response status. Use bounded backoff for retryable failures."},
+  {"id":"idempotency","terms":["idempotency","idempotent","идемпотентность","идемпотентности"],"evidence":"Store the stable event ID under a unique constraint in the same transaction as the side effect."},
+  {"id":"webhook-timeout","terms":["timeout","timeouts","таймаут","таймауты"],"evidence":"Compare webhook response latency to the sender deadline and acknowledge only after durable receipt."},
+  {"id":"event-order","terms":["ordering","out of order","sequence","порядок","последовательность"],"evidence":"Compare event sequence numbers for the affected resource and handle older events without rolling back newer state."}
+]

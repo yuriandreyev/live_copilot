@@ -29,3 +29,6 @@ class Settings(BaseSettings):
     asr_device: Literal["cpu", "cuda", "auto"] = "cpu"
     asr_compute_type: NonBlank = "int8"
     asr_language: NonBlank | None = "ru"
+    llm_enabled: bool = True
+    llm_endpoint: NonBlank = "http://127.0.0.1:8080/v1"
+    llm_model: NonBlank = "Forge-1-E2B-Q4_K_M.gguf"

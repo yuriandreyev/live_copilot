@@ -74,6 +74,11 @@ function showRecommendation(payload) {
   const rationale = document.createElement("div");
   rationale.textContent = payload.rationale;
   row.append(action, rationale);
+  if (payload.faq_ids?.length) {
+    const citations = document.createElement("small");
+    citations.textContent = `FAQ: ${payload.faq_ids.join(", ")}`;
+    row.append(citations);
+  }
   recommendations.append(row);
   recommendationsEmpty.hidden = true;
 }
@@ -211,7 +216,7 @@ function stop() {
   if (state !== "live" || !capture) return;
   const run = capture;
   setState("stopping", "Stopping…");
-  run.deadline = setTimeout(() => finish(run, "Capture did not stop in time. Try starting again."), 8_000);
+  run.deadline = setTimeout(() => finish(run, "Capture did not stop in time. Try starting again."), 36_000);
   run.worklet.port.postMessage("stop");
 }
 

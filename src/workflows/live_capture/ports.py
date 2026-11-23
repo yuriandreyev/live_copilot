@@ -1,6 +1,8 @@
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Protocol
 
+from agents.public import AgentContext, Recommendation
 from session.public import SessionStatus
 from transcription.public import TranscriptWindow
 
@@ -26,7 +28,15 @@ class CaptureOutcome(Enum):
     DELIVERY_TIMEOUT = auto()
 
 
-type CaptureUpdate = SessionStatus | TranscriptWindow | CaptureRejected
+@dataclass(frozen=True)
+class AnalysisUpdate:
+    context: AgentContext
+    recommendation: Recommendation
+
+
+type CaptureUpdate = (
+    SessionStatus | TranscriptWindow | CaptureRejected | AnalysisUpdate | Recommendation
+)
 
 
 class CaptureTransport(Protocol):

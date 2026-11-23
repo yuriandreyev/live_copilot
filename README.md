@@ -49,6 +49,19 @@ containing several seconds of continuous Russian speech. The smoke test
 requires both an interim and a final result. It uses local weights and
 accepts model and language overrides through `python -m transcription.smoke`.
 
+For live recommendations, run llama.cpp locally with a loaded chat model.
+The default endpoint is `LLM_ENDPOINT=http://127.0.0.1:8080/v1` and the
+default model is `LLM_MODEL=Forge-1-E2B-Q4_K_M.gguf`. Check the served model
+with `curl -f http://127.0.0.1:8080/v1/models`. Set `LLM_ENABLED=false` to
+run transcript-only capture. If local inference fails, capture continues
+and the recommendation panel shows a diagnostic fallback.
+
+Run `UV_CACHE_DIR=.uv-cache uv run --locked --no-sync python -m bootstrap.llm_smoke`
+to verify the duplicate-notification scenario against the running model.
+Set `LLM_ENDPOINT` and `LLM_MODEL` in the command environment to override the
+smoke test defaults. Live recommendations appear in the browser during
+capture. Database persistence for them is scheduled for WP08.
+
 ## Developer commands
 
 | Command | Purpose |

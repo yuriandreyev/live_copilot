@@ -6,12 +6,16 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from agents.infrastructure.llama_cpp import LlamaCpp
+from agents.public import SupportAnalysis
 from bootstrap.health import router as health_router
 from bootstrap.settings import Settings
+from knowledge.faq import FAQ
 from session.application.use_cases.session.create_session import CreateSession
 from session.application.use_cases.session.get_report import GetReport
 from session.application.use_cases.session.get_session import GetSession
@@ -52,6 +56,15 @@ def create_app() -> FastAPI:
     engine = build_engine(settings)
     repository = PostgresSessionRepository(async_sessionmaker(engine))
     asr: FasterWhisper | None = None
+    llm_client = httpx.AsyncClient(trust_env=False, timeout=12)
+    analysis = (
+        SupportAnalysis(
+            LlamaCpp(llm_client, settings.llm_endpoint, settings.llm_model),
+            FAQ().search,
+        )
+        if settings.llm_enabled
+        else None
+    )
 
     def new_recognizer() -> SpeechRecognizer:
         if settings.asr_backend == "fake":
@@ -77,6 +90,7 @@ def create_app() -> FastAPI:
             if asr is not None:
                 asr.close()
                 asr = None
+            await llm_client.aclose()
             await engine.dispose()
 
     app = FastAPI(title="Live AI Copilot", lifespan=lifespan)
@@ -89,7 +103,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(
-        websocket_routes(LiveCapture(SessionLifecycle(repository), new_recognizer))
+        websocket_routes(
+            LiveCapture(SessionLifecycle(repository), new_recognizer, analysis=analysis)
+        )
     )
     web_directory = Path(__file__).with_name("web")
     if not web_directory.is_dir():

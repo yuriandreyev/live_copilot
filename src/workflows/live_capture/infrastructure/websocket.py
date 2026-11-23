@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from agents.public import Recommendation
 from session.public import SessionStatus
 from transcription.public import (
     SAMPLE_BYTES,
@@ -12,10 +13,13 @@ from transcription.public import (
     TranscriptWindow,
 )
 from workflows.live_capture.infrastructure.events import (
+    AnalysisCompleted,
+    AnalysisPayload,
     CaptureErrorEvent,
     CaptureErrorPayload,
     CaptureStart,
     EventEnvelope,
+    RecommendationCreated,
     ServerEvent,
     SessionCompleted,
     SessionStatusChanged,
@@ -27,6 +31,7 @@ from workflows.live_capture.infrastructure.events import (
     client_command_adapter,
 )
 from workflows.live_capture.ports import (
+    AnalysisUpdate,
     CaptureCommand,
     CaptureDisconnected,
     CaptureOutcome,
@@ -64,6 +69,20 @@ def _server_event(
             if update.code == "audio_overload"
             else "session.error",
             payload=CaptureErrorPayload(code=update.code, message=str(update)),
+        )
+    if isinstance(update, AnalysisUpdate):
+        return AnalysisCompleted(
+            **envelope,
+            event_type="analysis.completed",
+            payload=AnalysisPayload(
+                utterance_id=update.recommendation.utterance_id,
+                context_version=update.recommendation.context_version,
+                context=update.context,
+            ),
+        )
+    if isinstance(update, Recommendation):
+        return RecommendationCreated(
+            **envelope, event_type="recommendation.created", payload=update
         )
     if isinstance(update, FinalizedUtterance):
         return TranscriptFinal(

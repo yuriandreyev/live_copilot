@@ -8,12 +8,14 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient, WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
+from agents.public import SupportAnalysis
 from bootstrap.health import router as health_router
+from knowledge.faq import FAQ
 from session.application.ports import SessionDetails
 from session.domain.enums import SessionStatus
 from session.public import SessionLifecycle
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
-from transcription.public import TranscriptWindow
+from transcription.public import FinalizedUtterance, TranscriptWindow
 from workflows.live_capture.infrastructure.websocket import (
     MAX_FRAME_BYTES,
     websocket_routes,
@@ -81,6 +83,7 @@ def make_client(
     *,
     audio_capacity: int = 30,
     flush_timeout: float = 5,
+    analysis: SupportAnalysis | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(health_router)
@@ -91,6 +94,7 @@ def make_client(
                 lambda: recognizer,
                 audio_capacity=audio_capacity,
                 flush_timeout=flush_timeout,
+                analysis=analysis,
             )
         )
     )
@@ -337,3 +341,91 @@ def test_disconnect_during_flush_interrupts_session() -> None:
         assert recognizer.cancelled.is_set()
 
     assert store.statuses[session_id] is SessionStatus.INTERRUPTED
+
+
+def test_live_analysis_discards_a_superseded_response() -> None:
+    started = Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    class Recognizer(FakeSpeechRecognizer):
+        async def accept_frame(self, frame: bytes) -> FinalizedUtterance:
+            if frame == FRAME_2:
+                release.set()
+            offset = 0 if frame == FRAME_1 else 100
+            return FinalizedUtterance(
+                utterance_id=uuid4(),
+                start_ms=offset,
+                end_ms=offset + 100,
+                text="Customers receive duplicate notifications.",
+            )
+
+    class Model:
+        async def complete(self, instructions: str, data: str) -> str:
+            calls.append(data)
+            if len(calls) == 1:
+                started.set()
+                await release.wait()
+            if '"transcript"' in data:
+                return (
+                    '{"status":"identified","issue":"Duplicate notifications",'
+                    '"intent":"Find the cause","confidence":0.95}'
+                )
+            return (
+                '{"action":"Compare event IDs.",'
+                '"rationale":"Repeated delivery can reuse the event ID.",'
+                '"faq_ids":["duplicate-notifications"]}'
+            )
+
+    store = MemorySessionStore()
+    session_id = store.create()
+    analysis = SupportAnalysis(Model(), FAQ().search)
+    with make_client(store, Recognizer(), analysis=analysis) as client:
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            start(socket, session_id)
+            socket.send_bytes(FRAME_1)
+            assert socket.receive_json()["event_type"] == "transcript.final"
+            assert started.wait(2)
+            socket.send_bytes(FRAME_2)
+            final = socket.receive_json()
+            assert final["event_type"] == "transcript.final"
+            command(socket, session_id, "capture.stop")
+            assert socket.receive_json()["payload"]["status"] == "stopping"
+            context = socket.receive_json()
+            recommendation = socket.receive_json()
+            assert context["event_type"] == "analysis.completed"
+            assert recommendation["event_type"] == "recommendation.created"
+            assert context["payload"]["context_version"] == 2
+            assert recommendation["payload"]["context_version"] == 2
+            assert (
+                recommendation["payload"]["utterance_id"]
+                == final["payload"]["utterance_id"]
+            )
+            assert recommendation["payload"]["faq_ids"] == ["duplicate-notifications"]
+            assert socket.receive_json()["event_type"] == "session.completed"
+
+
+def test_invalid_analysis_keeps_capture_open_and_allows_stop() -> None:
+    class InvalidModel:
+        async def complete(self, instructions: str, data: str) -> str:
+            return "invalid JSON"
+
+    store = MemorySessionStore()
+    session_id = store.create()
+    analysis = SupportAnalysis(InvalidModel(), FAQ().search)
+    with make_client(store, FakeSpeechRecognizer(), analysis=analysis) as client:
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            start(socket, session_id)
+            socket.send_bytes(FRAME_1)
+            assert socket.receive_json()["event_type"] == "transcript.interim"
+            command(socket, session_id, "capture.stop")
+            assert socket.receive_json()["payload"]["status"] == "stopping"
+            assert socket.receive_json()["event_type"] == "transcript.final"
+            fallback = socket.receive_json()
+            assert fallback["event_type"] == "recommendation.created"
+            assert fallback["payload"]["faq_ids"] == []
+            assert (
+                "Local AI analysis could not finish" in fallback["payload"]["rationale"]
+            )
+            assert socket.receive_json()["event_type"] == "session.completed"
+    assert store.statuses[session_id] is SessionStatus.COMPLETED
