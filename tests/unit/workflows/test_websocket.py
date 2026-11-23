@@ -400,8 +400,8 @@ def test_live_analysis_discards_a_superseded_response() -> None:
                     '"intent":"Find the cause","confidence":0.95}'
                 )
             return (
-                '{"action":"Compare event IDs.",'
-                '"rationale":"Repeated delivery can reuse the event ID.",'
+                '{"action":"Сравните идентификаторы событий.",'
+                '"rationale":"Повторная доставка может использовать тот же идентификатор.",'
                 '"faq_ids":["duplicate-notifications"]}'
             )
 
@@ -453,7 +453,8 @@ def test_invalid_analysis_keeps_capture_open_and_allows_stop() -> None:
             assert fallback["event_type"] == "recommendation.created"
             assert fallback["payload"]["faq_ids"] == []
             assert (
-                "Local AI analysis could not finish" in fallback["payload"]["rationale"]
+                "Локальная модель не смогла завершить анализ"
+                in fallback["payload"]["rationale"]
             )
             assert socket.receive_json()["event_type"] == "session.completed"
     assert store.statuses[session_id] is SessionStatus.COMPLETED

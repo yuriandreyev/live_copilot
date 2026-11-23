@@ -282,7 +282,7 @@ def configure_recommendations(monkeypatch: pytest.MonkeyPatch) -> None:
                 '"intent":"Find the cause","confidence":0.95}'
             )
         return (
-            '{"action":"Compare event IDs.","rationale":"Repeated delivery can reuse IDs.",'
+            '{"action":"Сравните идентификаторы событий.","rationale":"При повторной доставке идентификаторы могут совпадать.",'
             '"faq_ids":["duplicate-notifications"]}'
         )
 

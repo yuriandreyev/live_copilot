@@ -65,7 +65,7 @@ def test_readiness_metrics_and_correlated_logs_during_capture(
             assert recommendation["event_type"] == "recommendation.created"
             if timeout:
                 assert (
-                    "Local AI analysis could not finish"
+                    "Локальная модель не смогла завершить анализ"
                     in recommendation["payload"]["rationale"]
                 )
             assert socket.receive_json()["event_type"] == "session.completed"

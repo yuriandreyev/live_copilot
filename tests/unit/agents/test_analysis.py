@@ -16,8 +16,8 @@ CONTEXT = {
     "confidence": 0.9,
 }
 SUGGESTION = {
-    "action": "Compare the event IDs of two duplicate notifications.",
-    "rationale": "Matching IDs indicate repeat delivery of the same event.",
+    "action": "Сравните идентификаторы событий двух одинаковых уведомлений.",
+    "rationale": "Совпадение идентификаторов указывает на повторную доставку.",
     "faq_ids": ["duplicate-notifications"],
 }
 
@@ -37,12 +37,13 @@ def test_faq_lookup_is_deterministic() -> None:
 @pytest.mark.parametrize(
     ("case", "expected_citations", "expected_rationale", "expected_calls"),
     [
-        ("grounded", ("duplicate-notifications",), "Matching IDs", 2),
-        ("unknown_id", (), "Local AI analysis could not finish", 2),
-        ("ambiguous", (), "The cause is unconfirmed", 1),
-        ("invalid_json", (), "Local AI analysis could not finish", 1),
-        ("timeout", (), "Local AI analysis could not finish", 1),
-        ("unavailable", (), "Local AI analysis could not finish", 1),
+        ("grounded", ("duplicate-notifications",), "Совпадение идентификаторов", 2),
+        ("unknown_id", (), "Локальная модель не смогла завершить анализ", 2),
+        ("english_output", (), "Локальная модель не смогла завершить анализ", 2),
+        ("ambiguous", (), "причину пока установить не удалось", 1),
+        ("invalid_json", (), "Локальная модель не смогла завершить анализ", 1),
+        ("timeout", (), "Локальная модель не смогла завершить анализ", 1),
+        ("unavailable", (), "Локальная модель не смогла завершить анализ", 1),
     ],
 )
 def test_analysis_with_fake_endpoint(
@@ -77,6 +78,9 @@ def test_analysis_with_fake_endpoint(
                 if case == "unknown_id"
                 else SUGGESTION
             )
+            if case == "english_output":
+                suggestion = {**suggestion, "action": "Compare event IDs."}
+            assert "in Russian" in payload["messages"][0]["content"]
             content = json.dumps(suggestion)
         return httpx.Response(
             200, json={"choices": [{"message": {"content": content}}]}
