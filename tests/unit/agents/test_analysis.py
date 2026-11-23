@@ -122,3 +122,55 @@ def test_remote_endpoint_is_rejected() -> None:
                 LlamaCpp(client, "http://127.0.0.1.example.org/v1", "local-model")
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("latest", "faq_id", "action"),
+    [
+        (
+            "Вебхук не успевает ответить до тайм-аута.",
+            "webhook-timeout",
+            "Сравните время ответа вебхука с тайм-аутом отправителя.",
+        ),
+        (
+            "У двух доставок одинаковый идентификатор.",
+            "idempotency",
+            "Сохраняйте стабильный идентификатор события",
+        ),
+        (
+            "Отправитель повторно отправляет событие после ошибки 503.",
+            "event-retries",
+            "Проверьте число попыток доставки",
+        ),
+        (
+            "События приходят не по порядку.",
+            "event-order",
+            "Сравните порядковые номера событий",
+        ),
+    ],
+)
+def test_latest_detail_takes_priority_over_original_issue(
+    latest: str, faq_id: str, action: str
+) -> None:
+    previous = SUGGESTION["action"]
+    assert isinstance(previous, str)
+    transcript = f"Клиенты получают дубликаты уведомлений дважды.\n{latest}"
+
+    class Model:
+        async def complete(self, instructions: str, data: str) -> str:
+            payload = json.loads(data)
+            if "transcript" in payload:
+                assert payload["transcript"] == transcript
+                return json.dumps(CONTEXT)
+            raise AssertionError(
+                "A uniquely matched follow-up uses the FAQ recommendation."
+            )
+
+    analysis = SupportAnalysis(Model(), FAQ().search)
+    result = asyncio.run(
+        analysis.analyze(
+            uuid4(), 2, transcript, latest_text=latest, previous_action=previous
+        )
+    )
+    assert result.recommendation.action.startswith(action)
+    assert result.recommendation.faq_ids == (faq_id,)

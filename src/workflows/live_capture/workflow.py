@@ -376,6 +376,7 @@ class LiveCapture:
 
         async def analyze_latest() -> None:
             assert self._analysis is not None
+            previous_action: str | None = None
             while True:
                 await pending.wait()
                 requested = version
@@ -386,7 +387,11 @@ class LiveCapture:
                 assert latest is not None
                 requested_at = final_at
                 result = await self._analysis.analyze(
-                    latest.utterance_id, requested, transcript
+                    latest.utterance_id,
+                    requested,
+                    transcript,
+                    latest_text=latest.text,
+                    previous_action=previous_action,
                 )
                 for outcome in result.model_outcomes:
                     if self._metrics is not None:
@@ -445,6 +450,8 @@ class LiveCapture:
                                 )
                             )
                         await outbound.put((sequence, event))
+                        if recommendation.faq_ids:
+                            previous_action = recommendation.action
                     analyzed.set()
 
         async def recognize(frame: bytes | None) -> TranscriptWindow | None:

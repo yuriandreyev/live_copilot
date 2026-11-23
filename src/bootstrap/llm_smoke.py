@@ -18,14 +18,36 @@ async def main() -> None:
             os.getenv("LLM_MODEL", "Forge-1-E2B-Q4_K_M.gguf"),
         )
         start = perf_counter()
-        result = await SupportAnalysis(model, FAQ().search).analyze(
-            uuid4(), 1, "Customers are receiving duplicate API notifications."
-        )
-        print(
-            f"{perf_counter() - start:.2f}s {result.recommendation.model_dump_json()}"
-        )
-        if "duplicate-notifications" not in result.recommendation.faq_ids:
-            raise SystemExit("Expected the duplicate-notifications FAQ citation.")
+        analysis = SupportAnalysis(model, FAQ().search)
+        transcript = ""
+        previous_action = None
+        for version, (phrase, expected) in enumerate(
+            (
+                (
+                    "Клиенты получают дубликаты уведомлений от API.",
+                    "duplicate-notifications",
+                ),
+                ("У двух доставок одинаковый идентификатор.", "idempotency"),
+                ("Вебхук не успевает ответить до тайм-аута.", "webhook-timeout"),
+            ),
+            start=1,
+        ):
+            transcript = f"{transcript}\n{phrase}".strip()
+            result = await analysis.analyze(
+                uuid4(),
+                version,
+                transcript,
+                latest_text=phrase,
+                previous_action=previous_action,
+            )
+            recommendation = result.recommendation
+            print(f"{perf_counter() - start:.2f}s {recommendation.model_dump_json()}")
+            if (
+                expected not in recommendation.faq_ids
+                or previous_action == recommendation.action
+            ):
+                raise SystemExit(f"Expected a new action citing {expected}.")
+            previous_action = recommendation.action
 
 
 if __name__ == "__main__":
