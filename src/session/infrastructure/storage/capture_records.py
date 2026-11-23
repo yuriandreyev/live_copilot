@@ -4,52 +4,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase, Mapped
 
 from session.application.ports import StoredRecommendation, StoredUtterance
 from session.application.ports.capture_records import CaptureWriteError, OutboxEvent
-from session.infrastructure.storage.schema import (
-    outbox_events,
-    recommendations,
-    utterances,
-)
-
-
-class _Base(DeclarativeBase):
-    pass
-
-
-class _Utterance(_Base):
-    __table__ = utterances
-
-    id: Mapped[UUID]
-    session_id: Mapped[UUID]
-    sequence: Mapped[int]
-    start_ms: Mapped[int]
-    end_ms: Mapped[int]
-    text: Mapped[str]
-
-
-class _Recommendation(_Base):
-    __table__ = recommendations
-
-    id: Mapped[UUID]
-    session_id: Mapped[UUID]
-    utterance_id: Mapped[UUID]
-    context_version: Mapped[int]
-    action: Mapped[str]
-    rationale: Mapped[str]
-    faq_ids: Mapped[list[str]]
-    prompt_version: Mapped[str]
-
-
-class _OutboxEvent(_Base):
-    __table__ = outbox_events
+from storage.models import OutboxRow, RecommendationRow, UtteranceRow
 
 
 def _enqueue(db: AsyncSession, event: OutboxEvent) -> None:
     db.add(
-        _OutboxEvent(
+        OutboxRow(
             event_id=event.event_id, type=event.event_type, payload=event.envelope
         )
     )
@@ -63,7 +26,7 @@ class PostgresCaptureRecordStore:
         self, session_id: UUID, utterance: StoredUtterance, event: OutboxEvent
     ) -> bool:
         query = (
-            insert(_Utterance)
+            insert(UtteranceRow)
             .values(
                 id=utterance.utterance_id,
                 session_id=session_id,
@@ -72,15 +35,15 @@ class PostgresCaptureRecordStore:
                 end_ms=utterance.end_ms,
                 text=utterance.text,
             )
-            .on_conflict_do_nothing(index_elements=[_Utterance.id])
-            .returning(_Utterance.id)
+            .on_conflict_do_nothing(index_elements=[UtteranceRow.id])
+            .returning(UtteranceRow.id)
         )
         try:
             async with self._factory.begin() as db:
                 if await db.scalar(query) is not None:
                     _enqueue(db, event)
                     return True
-                existing = await db.get(_Utterance, utterance.utterance_id)
+                existing = await db.get(UtteranceRow, utterance.utterance_id)
                 if existing is None or (
                     existing.session_id,
                     existing.start_ms,
@@ -100,7 +63,7 @@ class PostgresCaptureRecordStore:
         event: OutboxEvent,
     ) -> bool:
         query = (
-            insert(_Recommendation)
+            insert(RecommendationRow)
             .values(
                 id=recommendation.recommendation_id,
                 session_id=session_id,
@@ -114,7 +77,7 @@ class PostgresCaptureRecordStore:
             .on_conflict_do_nothing(
                 constraint="uq_recommendations_utterance_context_version"
             )
-            .returning(_Recommendation.id)
+            .returning(RecommendationRow.id)
         )
         try:
             async with self._factory.begin() as db:
@@ -122,7 +85,7 @@ class PostgresCaptureRecordStore:
                     _enqueue(db, event)
                     return True
                 existing = await db.scalar(
-                    select(_Recommendation).filter_by(
+                    select(RecommendationRow).filter_by(
                         utterance_id=utterance_id,
                         context_version=recommendation.context_version,
                     )

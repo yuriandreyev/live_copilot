@@ -72,15 +72,29 @@ capture and are available afterward from the session transcript endpoint.
 | `make test` | Run the unit and integration tests |
 | `make verify` | Run lint, formatting, type checks, and the full test suite |
 | `make run-api` | Start the API at http://localhost:8000 |
-| `make run-worker` | Run the worker scaffold, which reports its status and exits. Event consumption arrives in WP09. |
+| `make run-worker` | Consume RabbitMQ events and write session summaries |
 | `make infra-up` | Start PostgreSQL and RabbitMQ and wait for both to become healthy |
 | `make infra-down` | Stop and remove the infrastructure containers while retaining their data volumes |
 | `make db-up` / `make db-down` | Start or stop PostgreSQL alone |
 | `make migrate` | Apply pending PostgreSQL schema migrations |
 
-Before running `make test` or `make verify`, start PostgreSQL with
-`make db-up`. The configured development role needs permission to create
-the temporary integration test database.
+Before running `make test` or `make verify`, start PostgreSQL and RabbitMQ
+with `make infra-up`. The development credentials must allow creation of
+temporary integration test databases and RabbitMQ queues.
+
+## Background delivery
+
+The API runs the outbox publisher in the background. Run `make run-worker`
+in a separate terminal to process its messages and populate session reports.
+Both processes use `RABBITMQ_HOST`, `RABBITMQ_PORT`, and `RABBITMQ_QUEUE`.
+Setting `OUTBOX_ENABLED=false` pauses publishing while the API continues
+recording events in PostgreSQL.
+
+The publisher under `src/outbox` and consumer under `src/worker` each own
+their application use cases, ports, and infrastructure adapters.
+`src/bootstrap` wires both components, and `src/storage` holds their shared
+PostgreSQL mappings. See the [recovery runbook](docs/demo-runbook.md) for
+worker restart, broker outage, and replay checks.
 
 ## Session API
 

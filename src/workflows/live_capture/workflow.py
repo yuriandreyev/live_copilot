@@ -20,6 +20,7 @@ from session.public import (
 from transcription.public import FinalizedUtterance, SpeechRecognizer, TranscriptWindow
 from workflows.live_capture.events import (
     RecommendationCreated,
+    SessionCompleted,
     TranscriptFinal,
     TranscriptFinalPayload,
     new_envelope,
@@ -37,7 +38,9 @@ from workflows.live_capture.ports import (
 logger = logging.getLogger(__name__)
 
 
-def _outbox_event(event: TranscriptFinal | RecommendationCreated) -> OutboxEvent:
+def _outbox_event(
+    event: TranscriptFinal | RecommendationCreated | SessionCompleted,
+) -> OutboxEvent:
     return OutboxEvent(event.event_id, event.event_type, event.model_dump(mode="json"))
 
 
@@ -128,11 +131,22 @@ class LiveCapture:
             if admitted:
                 self._admission.release()
 
-    async def _transition(self, session: _CaptureState, target: SessionStatus) -> None:
+    async def _transition(
+        self,
+        session: _CaptureState,
+        target: SessionStatus,
+        *,
+        completion: SessionCompleted | None = None,
+    ) -> None:
         async def persist() -> None:
             with CancelScope(shield=True):
                 if not await self._lifecycle.transition(
-                    session.id, session.status, target
+                    session.id,
+                    session.status,
+                    target,
+                    completion_event=_outbox_event(completion)
+                    if completion is not None
+                    else None,
                 ):
                     raise CaptureRejected(
                         "session_unavailable", "Session state changed."
@@ -329,8 +343,15 @@ class LiveCapture:
                 stopping.reschedule(loop.time() + 2 * ANALYSIS_TIMEOUT + 4)
                 await analyzed.wait()
             await outbound.join()
-            await self._transition(session, SessionStatus.COMPLETED)
-            await outbound.put((next(session.sequence), session.status))
+            sequence = next(session.sequence)
+            completion = SessionCompleted(
+                **new_envelope(session.id, sequence).model_dump(),
+                event_type="session.completed",
+            )
+            await self._transition(
+                session, SessionStatus.COMPLETED, completion=completion
+            )
+            await outbound.put((sequence, completion))
             await outbound.join()
 
         outbound.put_nowait((next(session.sequence), session.status))

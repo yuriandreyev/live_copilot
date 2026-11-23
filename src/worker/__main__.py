@@ -1,5 +1,6 @@
-import logging
+import asyncio
+
+from bootstrap.worker import run_worker
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Worker scaffold started. RabbitMQ consumption is scheduled for WP09.")
+    asyncio.run(run_worker())

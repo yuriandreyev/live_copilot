@@ -2,6 +2,7 @@ from itertools import groupby
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from session.application.ports import (
@@ -11,9 +12,11 @@ from session.application.ports import (
     StoredRecommendation,
     StoredUtterance,
 )
+from session.application.ports.capture_records import CaptureWriteError, OutboxEvent
 from session.domain.enums import SessionStatus
 from session.domain.session import Session
-from session.infrastructure.storage.schema import (
+from storage.models import OutboxRow
+from storage.schema import (
     recommendations,
     session_summaries,
     sessions,
@@ -32,7 +35,12 @@ class PostgresSessionRepository:
             )
 
     async def transition(
-        self, session_id: UUID, previous: SessionStatus, target: SessionStatus
+        self,
+        session_id: UUID,
+        previous: SessionStatus,
+        target: SessionStatus,
+        *,
+        completion_event: OutboxEvent | None = None,
     ) -> bool:
         values: dict[str, object] = {"status": target.value}
         if target is SessionStatus.LIVE:
@@ -49,8 +57,23 @@ class PostgresSessionRepository:
             .values(**values)
             .returning(sessions.c.id)
         )
-        async with self._session_factory.begin() as db:
-            return (await db.scalar(query)) is not None
+        try:
+            async with self._session_factory.begin() as db:
+                if await db.scalar(query) is None:
+                    return False
+                if completion_event is not None:
+                    db.add(
+                        OutboxRow(
+                            event_id=completion_event.event_id,
+                            type=completion_event.event_type,
+                            payload=completion_event.envelope,
+                        )
+                    )
+                return True
+        except (SQLAlchemyError, OSError) as error:
+            if completion_event is None:
+                raise
+            raise CaptureWriteError("Could not commit session completion.") from error
 
     async def get(self, session_id: UUID) -> SessionDetails | None:
         summary_exists = (

@@ -21,6 +21,7 @@ from session.public import (
 )
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 from transcription.public import FinalizedUtterance, TranscriptWindow
+from workflows.live_capture.events import SessionCompleted
 from workflows.live_capture.infrastructure.websocket import (
     MAX_FRAME_BYTES,
     websocket_routes,
@@ -62,7 +63,12 @@ class MemorySessionStore:
         return True
 
     async def transition(
-        self, session_id: UUID, previous: SessionStatus, target: SessionStatus
+        self,
+        session_id: UUID,
+        previous: SessionStatus,
+        target: SessionStatus,
+        *,
+        completion_event: OutboxEvent | None = None,
     ) -> bool:
         if self.statuses[session_id] is not previous:
             return False
@@ -160,11 +166,11 @@ def test_capture_accepts_an_in_memory_transport() -> None:
 
     assert outcome is CaptureOutcome.COMPLETED
     assert store.statuses[session_id] is SessionStatus.COMPLETED
-    assert updates == [
-        (1, SessionStatus.LIVE),
-        (2, SessionStatus.STOPPING),
-        (3, SessionStatus.COMPLETED),
-    ]
+    assert len(updates) == 3
+    assert updates[:2] == [(1, SessionStatus.LIVE), (2, SessionStatus.STOPPING)]
+    sequence, completion = updates[2]
+    assert isinstance(completion, SessionCompleted)
+    assert (sequence, completion.sequence) == (3, 3)
 
 
 def test_capture_drains_frames_in_order_then_finalizes() -> None:

@@ -14,8 +14,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from agents.infrastructure.llama_cpp import LlamaCpp
 from agents.public import SupportAnalysis
 from bootstrap.health import router as health_router
+from bootstrap.rabbitmq import open_exchange
 from bootstrap.settings import Settings
 from knowledge.faq import FAQ
+from outbox.application.use_cases.publish_outbox import PublishOutbox
+from outbox.infrastructure.postgres import PostgresOutboxStore
+from outbox.infrastructure.rabbitmq import RabbitMQPublisher
 from session.application.use_cases.session.create_session import CreateSession
 from session.application.use_cases.session.get_report import GetReport
 from session.application.use_cases.session.get_session import GetSession
@@ -79,6 +83,8 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal asr
+        publisher = RabbitMQPublisher(lambda: open_exchange(settings))
+        publisher_task = None
         try:
             if settings.asr_backend == "faster-whisper":
                 asr = await asyncio.to_thread(
@@ -88,8 +94,15 @@ def create_app() -> FastAPI:
                     compute_type=settings.asr_compute_type,
                     language=settings.asr_language,
                 )
+            if settings.outbox_enabled:
+                outbox = PublishOutbox(PostgresOutboxStore(session_factory), publisher)
+                publisher_task = asyncio.create_task(outbox.run())
             yield
         finally:
+            if publisher_task is not None:
+                publisher_task.cancel()
+                await asyncio.gather(publisher_task, return_exceptions=True)
+            await publisher.close()
             if asr is not None:
                 asr.close()
                 asr = None

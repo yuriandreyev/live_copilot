@@ -50,7 +50,7 @@ _ERROR_CLOSE_CODES = {
 def _server_event(
     session_id: UUID, sequence: int, update: CaptureUpdate
 ) -> ServerEvent:
-    if isinstance(update, (TranscriptFinal, RecommendationCreated)):
+    if isinstance(update, (TranscriptFinal, RecommendationCreated, SessionCompleted)):
         return update
     envelope = new_envelope(session_id, sequence).model_dump()
 
@@ -80,8 +80,6 @@ def _server_event(
                 start_ms=update.start_ms, end_ms=update.end_ms, text=update.text
             ),
         )
-    if update is SessionStatus.COMPLETED:
-        return SessionCompleted(**envelope, event_type="session.completed")
     assert update in (SessionStatus.LIVE, SessionStatus.STOPPING)
     return SessionStatusChanged(
         **envelope,

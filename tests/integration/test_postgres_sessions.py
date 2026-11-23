@@ -1,8 +1,4 @@
 import asyncio
-import os
-import subprocess
-import sys
-from collections.abc import Iterator
 from dataclasses import replace
 from uuid import UUID, uuid4
 
@@ -10,7 +6,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import workflows.live_capture.workflow as capture_workflow
 from agents.infrastructure.llama_cpp import LlamaCpp
@@ -18,52 +14,18 @@ from bootstrap.main import create_app
 from bootstrap.settings import Settings
 from session.domain.session import Session
 from session.infrastructure.storage.capture_records import PostgresCaptureRecordStore
-from session.infrastructure.storage.database import build_engine, database_url
-from session.infrastructure.storage.schema import (
+from session.infrastructure.storage.database import build_engine
+from session.infrastructure.storage.sessions import PostgresSessionRepository
+from session.public import OutboxEvent, StoredRecommendation
+from storage.schema import (
     outbox_events,
     recommendations,
     session_summaries,
     sessions,
     utterances,
 )
-from session.infrastructure.storage.sessions import PostgresSessionRepository
-from session.public import OutboxEvent, StoredRecommendation
 from transcription.infrastructure.audio.fake_asr import FakeSpeechRecognizer
 from transcription.public import FinalizedUtterance
-
-
-async def administer_database(settings: Settings, statement: str) -> None:
-    url = database_url(settings).set(database="postgres")
-    engine = create_async_engine(url, isolation_level="AUTOCOMMIT")
-    try:
-        async with engine.connect() as conn:
-            await conn.exec_driver_sql(statement)
-    finally:
-        await engine.dispose()
-
-
-@pytest.fixture(scope="module")
-def database_name() -> Iterator[str]:
-    settings = Settings()  # type: ignore[call-arg]
-    database = f"copilot_test_{uuid4().hex}"
-    asyncio.run(administer_database(settings, f'CREATE DATABASE "{database}"'))
-    try:
-        env = {**os.environ, "POSTGRES_DB": database}
-        alembic = [sys.executable, "-m", "alembic"]
-        subprocess.run([*alembic, "upgrade", "head"], check=True, env=env)
-        subprocess.run([*alembic, "upgrade", "head"], check=True, env=env)
-        subprocess.run([*alembic, "check"], check=True, env=env)
-        yield database
-    finally:
-        asyncio.run(administer_database(settings, f'DROP DATABASE "{database}"'))
-
-
-@pytest.fixture
-def database_settings(database_name: str, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    monkeypatch.setenv("ASR_BACKEND", "fake")
-    monkeypatch.setenv("LLM_ENABLED", "false")
-    monkeypatch.setenv("POSTGRES_DB", database_name)
-    return Settings()  # type: ignore[call-arg]
 
 
 def test_clean_database_is_at_migration_head(database_settings: Settings) -> None:
@@ -358,7 +320,8 @@ def test_live_records_and_outbox_match_websocket_after_replay(
             # Stop replays the same final utterance from the recognizer's flush.
             socket.send_json({**command, "event_type": "capture.stop"})
             assert socket.receive_json()["payload"]["status"] == "stopping"
-            assert socket.receive_json()["event_type"] == "session.completed"
+            completion = socket.receive_json()
+            assert completion["event_type"] == "session.completed"
 
         async def replay_recommendation_and_check_outbox() -> None:
             engine = build_engine(database_settings)
@@ -396,10 +359,12 @@ def test_live_records_and_outbox_match_websocket_after_replay(
                         )
                     ).all()
                     assert {str(row.event_id): row.payload for row in rows} == {
-                        event["event_id"]: event for event in (final, recommendation)
+                        event["event_id"]: event
+                        for event in (final, recommendation, completion)
                     }
                     assert sorted(row.type for row in rows) == [
                         "recommendation.created",
+                        "session.completed",
                         "transcript.final",
                     ]
                     assert all(row.published_at is None for row in rows)
@@ -421,13 +386,16 @@ def test_live_records_and_outbox_match_websocket_after_replay(
         ]
 
 
-@pytest.mark.parametrize("failed_type", ["transcript.final", "recommendation.created"])
+@pytest.mark.parametrize(
+    "failed_type", ["transcript.final", "recommendation.created", "session.completed"]
+)
 def test_outbox_failure_rolls_back_record_and_emits_persistence_error(
     database_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
     failed_type: str,
 ) -> None:
-    configure_recommendations(monkeypatch)
+    if failed_type != "session.completed":
+        configure_recommendations(monkeypatch)
     occupied_id = uuid4()
 
     async def seed_outbox_id() -> None:
@@ -449,7 +417,8 @@ def test_outbox_failure_rolls_back_record_and_emits_persistence_error(
 
     def collide(
         event: capture_workflow.TranscriptFinal
-        | capture_workflow.RecommendationCreated,
+        | capture_workflow.RecommendationCreated
+        | capture_workflow.SessionCompleted,
     ) -> OutboxEvent:
         outbox = original(event)
         return (
@@ -471,7 +440,17 @@ def test_outbox_failure_rolls_back_record_and_emits_persistence_error(
                 }
             )
             assert socket.receive_json()["payload"]["status"] == "live"
-            socket.send_bytes(b"\x01\x00")
+            if failed_type == "session.completed":
+                socket.send_json(
+                    {
+                        "schema_version": 1,
+                        "session_id": session_id,
+                        "event_type": "capture.stop",
+                    }
+                )
+                assert socket.receive_json()["payload"]["status"] == "stopping"
+            else:
+                socket.send_bytes(b"\x01\x00")
             if failed_type == "recommendation.created":
                 assert socket.receive_json()["event_type"] == "transcript.final"
             error = socket.receive_json()
@@ -479,8 +458,8 @@ def test_outbox_failure_rolls_back_record_and_emits_persistence_error(
             assert error["payload"]["code"] == "persistence_failed"
 
         rows = client.get(f"{url}/transcript").json()["utterances"]
-        if failed_type == "transcript.final":
-            assert rows == []
-        else:
+        if failed_type == "recommendation.created":
             assert len(rows) == 1 and rows[0]["recommendations"] == []
+        else:
+            assert rows == []
         assert client.get(url).json()["status"] == "failed"

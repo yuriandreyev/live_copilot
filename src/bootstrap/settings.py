@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     postgres_password: Password
     rabbitmq_default_user: NonBlank
     rabbitmq_default_pass: Password
+    rabbitmq_host: NonBlank = "127.0.0.1"
+    rabbitmq_port: Annotated[int, Field(ge=1, le=65535)] = 5672
+    rabbitmq_queue: NonBlank = "live-copilot.v1"
+    outbox_enabled: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     asr_backend: Literal["faster-whisper", "fake"] = "faster-whisper"
     asr_model_path: Path = Path("models/faster-whisper-small")

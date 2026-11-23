@@ -6,7 +6,7 @@ from sqlalchemy.engine import Connection
 
 from bootstrap.settings import Settings
 from session.infrastructure.storage.database import build_engine, database_url
-from session.infrastructure.storage.schema import metadata
+from storage.schema import metadata
 
 
 def migrate(connection: Connection) -> None:
