@@ -1,23 +1,61 @@
-# WP09 delivery and recovery runbook
+# Live AI Copilot demo runbook
 
-Start PostgreSQL and RabbitMQ, apply the existing schema, and launch the API.
+## Fresh start
+
+Complete the model and environment setup in the [README](../README.md). For
+the English script below, start the API with `ASR_LANGUAGE=en`.
 
 ```sh
 make infra-up
 make migrate
-make run-api
+ASR_LANGUAGE=en make run-api
 ```
 
-Run `make run-worker` in a separate terminal. Open the browser UI at
-`http://127.0.0.1:8000`, start a capture, and describe duplicate API
-notifications. Stop capture and keep the session ID from the browser's network
-panel. The report endpoint eventually contains the worker's utterance and
-recommendation counts.
+Run `make run-worker` in a separate terminal. Check
+`curl -fsS http://127.0.0.1:8000/readyz` before opening
+`http://127.0.0.1:8000` in Chromium.
+
+Select **Start capture**, grant microphone access, and read this synthetic
+support dialogue at a steady pace.
+
+> Our customers receive duplicate API notifications. The same event appears
+> twice in the webhook history. Could you help me find the cause?
+
+During capture the UI shows **Live** and incremental transcript text. Select
+**Stop** and wait for the final transcript and recommendation. The expected
+citation is `duplicate-notifications`. A relevant action compares event IDs
+and checks whether the consumer processes the same event twice.
+
+Copy the session ID from the WebSocket URL in the browser's Network panel,
+set `COPILOT_SESSION_ID` to that UUID in your terminal, and query the stored
+transcript and report.
 
 ```sh
-curl -f "http://127.0.0.1:8000/api/sessions/$COPILOT_SESSION_ID/report"
+curl -fsS "http://127.0.0.1:8000/api/sessions/$COPILOT_SESSION_ID/transcript"
+curl -fsS "http://127.0.0.1:8000/api/sessions/$COPILOT_SESSION_ID/report"
+curl -fsS http://127.0.0.1:8000/metrics
 docker compose exec -T rabbitmq rabbitmqctl list_queues name messages_ready messages_unacknowledged
 ```
+
+## Prerecorded input fallback
+
+Generate the 16 kHz mono PCM WAV on macOS. The fixture is synthetic and contains
+no customer recording. Label the input as prerecorded whenever demonstrating it.
+
+```sh
+bash demo/generate-fixture.sh
+```
+
+Open the local page in a separate Chromium tab. Paste the contents of
+[`demo/prerecorded-input.js`](../demo/prerecorded-input.js) into that tab's
+DevTools console and select the generated WAV in the file field. The helper
+substitutes a local Web Audio stream for microphone input until you reload the
+tab.
+
+Click **Start capture**, wait for the fixture to play and stop the capture
+after about 10 seconds. Check the same transcript, recommendation, and report
+as in the spoken walkthrough. Reload the tab to return to physical microphone
+input.
 
 ## Worker outage
 
@@ -28,7 +66,15 @@ docker compose exec -T rabbitmq rabbitmqctl list_queues name messages_ready mess
    ready events and the new session report should still be empty.
 4. Run `make run-worker` and repeat the queue and report checks. Ready and
    unacknowledged counts should fall to zero. The report should contain one
-   summary.
+   summary. Run the replay check below to verify the duplicate-effect count.
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run --locked --no-sync pytest \
+  tests/integration/test_rabbitmq_delivery.py::test_confirmed_message_replays_after_publisher_exits_before_marking_database
+```
+
+The test checks one PostgreSQL processed marker and one summary after
+two confirmed deliveries of the completion event.
 
 ## Broker outage
 

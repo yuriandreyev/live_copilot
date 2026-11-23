@@ -1,18 +1,36 @@
 # Live AI Copilot
 
-Local AI copilot for support conversations. The WP01 scaffold provides the API
-liveness endpoint and local PostgreSQL and RabbitMQ infrastructure. WP03 adds database
-migrations and session HTTP endpoints.
+Live AI Copilot listens to a support conversation, updates the transcript as
+you speak, and suggests a next step from a small FAQ. It runs ASR and language
+inference on the local machine. PostgreSQL stores the final transcript and
+recommendations. An independent RabbitMQ worker produces the session report.
+
+See the [interview demo runbook](docs/demo-runbook.md) and the
+[release handoff](docs/release-acceptance.md).
 
 ## Prerequisites
 
-Python 3.12, uv, GNU Make, and a running Docker Engine with Docker Compose v2.
+Python 3.12, uv, GNU Make, Docker Engine with Docker Compose v2, desktop
+Chromium or Chrome, and a local llama.cpp server. The prerecorded fallback
+generator uses macOS `say` and `afconvert`. Node.js runs the browser audio tests.
 
 ## Local startup
 
-Run from the repository root. Place the [multilingual small model files](https://huggingface.co/Systran/faster-whisper-small/tree/536b066)
+Run from the repository root. Place the [Systran multilingual small model files](https://huggingface.co/Systran/faster-whisper-small/tree/main)
 (`config.json`, `model.bin`, `tokenizer.json`, and `vocabulary.txt`) in
-`models/faster-whisper-small/` before starting the API.
+`models/faster-whisper-small/` before starting the API. The reference
+configuration uses Systran revision `536b066`. For recommendations, download
+the Q4_K_M GGUF from the [Forge model card](https://huggingface.co/YoSaNoo/Forge-1-E2B)
+and put it under `models/`. Start the [llama.cpp server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
+in its own terminal.
+
+```sh
+llama-server --host 127.0.0.1 --port 8080 -m models/Forge-1-E2B-Q4_K_M.gguf
+curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+Set `LLM_MODEL` to the ID returned by the server if it differs from the default.
+The model weights must be provisioned once. Runtime inference stays local.
 
 ```sh
 cp .env.example .env
@@ -23,9 +41,10 @@ make migrate
 make run-api
 ```
 
-In a second terminal, run `curl -f http://localhost:8000/healthz`.
-Expect HTTP 200 and `{"status":"ok"}`. The probe checks API liveness and
-does not connect to PostgreSQL or RabbitMQ.
+In another terminal, start `make run-worker`. Check the API with
+`curl -fsS http://127.0.0.1:8000/healthz` and
+`curl -fsS http://127.0.0.1:8000/readyz`. The first checks liveness, and
+the second shows whether PostgreSQL, RabbitMQ, and both model paths are ready.
 
 Open http://localhost:8000 in Chromium, select **Start capture**, and allow
 microphone access. Speak briefly, then select **Stop** to flush and finalize
@@ -147,3 +166,14 @@ each finalized utterance or recommendation together with its outbox event
 before sending the WebSocket update. The transcript endpoint returns
 committed updates in order. If a write fails, the socket reports
 `session.error` with code `persistence_failed`.
+
+## Troubleshooting and limits
+
+- For microphone permission errors, grant access to the local origin in
+  Chromium and start a new capture. The runbook includes a synthetic fallback.
+- For HTTP 503 from readiness, check the unavailable dependency in the JSON
+  response. Check the ASR model path and query `/v1/models` on llama.cpp.
+- If transcripts are saved while reports are empty, check the worker and
+  RabbitMQ. Start the worker with `make run-worker` and check the report again.
+- The demo supports one active capture. The reference run timings in the
+  handoff describe individual observations. WP11 latency percentiles remain open.
