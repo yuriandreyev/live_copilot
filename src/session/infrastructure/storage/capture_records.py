@@ -52,7 +52,7 @@ class PostgresCaptureRecordStore:
                 ) != (session_id, utterance.start_ms, utterance.end_ms, utterance.text):
                     raise CaptureWriteError("Conflicting finalized utterance.")
                 return False
-        except SQLAlchemyError as error:
+        except (SQLAlchemyError, OSError) as error:
             raise CaptureWriteError("Could not commit finalized utterance.") from error
 
     async def record_recommendation(
@@ -93,5 +93,5 @@ class PostgresCaptureRecordStore:
                 if existing is None or existing.session_id != session_id:
                     raise CaptureWriteError("Conflicting recommendation.")
                 return False
-        except SQLAlchemyError as error:
+        except (SQLAlchemyError, OSError) as error:
             raise CaptureWriteError("Could not commit recommendation.") from error

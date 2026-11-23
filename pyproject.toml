@@ -30,7 +30,7 @@ requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bootstrap", "src/session", "src/worker", "src/knowledge", "src/agents", "src/transcription", "src/workflows", "src/outbox", "src/storage"]
+packages = ["src/bootstrap", "src/session", "src/worker", "src/knowledge", "src/agents", "src/transcription", "src/workflows", "src/outbox", "src/storage", "src/observability"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "web" = "bootstrap/web"

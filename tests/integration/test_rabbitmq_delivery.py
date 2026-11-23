@@ -3,6 +3,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from time import monotonic, sleep
 from uuid import UUID, uuid4
 
@@ -25,8 +26,9 @@ from storage.models import OutboxRow, ProcessedEventRow, SummaryRow
 
 @pytest.fixture
 def rabbit_settings(
-    database_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    database_settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Iterator[Settings]:
+    monkeypatch.setenv("WORKER_METRICS_PATH", str(tmp_path / "worker-metrics.json"))
     monkeypatch.setenv("RABBITMQ_QUEUE", f"live-copilot.test.{uuid4().hex}")
     monkeypatch.setenv("OUTBOX_ENABLED", "true")
     settings = Settings()  # type: ignore[call-arg]
@@ -222,9 +224,17 @@ def test_confirmed_message_replays_after_publisher_exits_before_marking_database
             await engine.dispose()
 
     asyncio.run(publish_twice())
-    with running_worker():
+    with running_worker(), TestClient(create_app()) as client:
         wait_for(lambda: asyncio.run(event_status(rabbit_settings, ids))[2] == 1)
         wait_for(lambda: asyncio.run(queue_depth(rabbit_settings)) == 0)
+        wait_for(
+            lambda: 'worker_events_total{outcome="duplicate"} 1\n'
+            in client.get("/metrics").text
+        )
+        assert (
+            'worker_events_total{outcome="processed"} 1\n'
+            in client.get("/metrics").text
+        )
     assert asyncio.run(event_status(rabbit_settings, ids))[2] == 1
     assert asyncio.run(summary_count(rabbit_settings, session_id)) == 1
 
@@ -254,7 +264,10 @@ def test_invalid_and_exhausted_deliveries_reach_dead_letter_queue(
             await publisher.close()
 
     asyncio.run(publish())
-    with running_worker():
+    with running_worker(), TestClient(create_app()) as client:
         wait_for(lambda: asyncio.run(queue_depth(rabbit_settings, dead=True)) == 2)
         assert asyncio.run(queue_depth(rabbit_settings)) == 0
         assert asyncio.run(event_status(rabbit_settings, [event_id]))[2] == 0
+        metrics = client.get("/metrics").text
+        assert 'worker_events_total{outcome="retried"} 2\n' in metrics
+        assert 'worker_events_total{outcome="failed"} 2\n' in metrics

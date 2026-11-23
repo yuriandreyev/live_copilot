@@ -42,6 +42,10 @@ _ERROR_CLOSE_CODES = {
     "session_busy": 1013,
     "audio_overload": 1013,
     "capture_failed": 1011,
+    "asr_failed": 1011,
+    "asr_timeout": 1011,
+    "asr_unavailable": 1011,
+    "delivery_timeout": 1011,
     "flush_timeout": 1011,
     "persistence_failed": 1011,
 }

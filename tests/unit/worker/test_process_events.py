@@ -42,7 +42,7 @@ def test_worker_acknowledges_commit_and_bounds_retries(
             delivered: SessionEvent,
             *,
             summarize: Callable[[int, int], str] | None,
-        ) -> None:
+        ) -> bool:
             assert delivered == event
             assert summarize is not None and summarize(1, 2) == (
                 "Finalized utterances: 1. Recommendations: 2."
@@ -51,6 +51,7 @@ def test_worker_acknowledges_commit_and_bounds_retries(
                 steps.append("retry")
                 raise ProcessingUnavailable
             steps.append("commit")
+            return True
 
     class Message:
         def event(self) -> SessionEvent:

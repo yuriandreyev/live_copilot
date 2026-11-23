@@ -43,14 +43,16 @@ def test_app_serves_browser_capture_assets(configured_environment: None) -> None
             assert client.get(path).status_code == 200
 
 
-def test_app_startup_reports_missing_model(
+def test_readiness_reports_missing_model_while_liveness_succeeds(
     configured_environment: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("ASR_BACKEND", "faster-whisper")
     monkeypatch.setenv("ASR_MODEL_PATH", "missing-model")
-    with pytest.raises(FileNotFoundError, match="ASR model directory does not exist"):
-        with TestClient(create_app()):
-            pass
+    with TestClient(create_app()) as client:
+        assert client.get("/healthz").status_code == 200
+        readiness = client.get("/readyz")
+        assert readiness.status_code == 503
+        assert readiness.json()["dependencies"]["asr"] == "unavailable"
 
 
 @pytest.mark.parametrize("value", [None, ""])

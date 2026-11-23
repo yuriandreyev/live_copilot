@@ -22,7 +22,7 @@ class PostgresProcessedEventStore:
 
     async def apply(
         self, event: SessionEvent, *, summarize: Callable[[int, int], str] | None
-    ) -> None:
+    ) -> bool:
         claim = (
             insert(ProcessedEventRow)
             .values(consumer_name=_CONSUMER_NAME, event_id=event.id)
@@ -31,8 +31,10 @@ class PostgresProcessedEventStore:
         )
         try:
             async with self._factory.begin() as db:
-                if await db.scalar(claim) is None or summarize is None:
-                    return
+                if await db.scalar(claim) is None:
+                    return False
+                if summarize is None:
+                    return True
                 utterances = await db.scalar(
                     select(func.count())
                     .select_from(UtteranceRow)
@@ -51,5 +53,6 @@ class PostgresProcessedEventStore:
                     )
                     .on_conflict_do_nothing()
                 )
+                return True
         except (SQLAlchemyError, OSError) as error:
             raise ProcessingUnavailable from error

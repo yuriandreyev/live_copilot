@@ -16,10 +16,14 @@ from transcription.domain.entities import FinalizedUtterance, TranscriptWindow
 
 class FasterWhisperRecognizer:
     def __init__(
-        self, infer: Callable[[bytes], str], executor: ThreadPoolExecutor
+        self,
+        infer: Callable[[bytes], str],
+        executor: ThreadPoolExecutor,
+        capacity: asyncio.Lock | None = None,
     ) -> None:
         self._infer = infer
         self._executor = executor
+        self._capacity = capacity if capacity is not None else asyncio.Lock()
         self._assembler = UtteranceAssembler()
 
     async def accept_frame(self, frame: bytes) -> TranscriptWindow | None:
@@ -34,9 +38,21 @@ class FasterWhisperRecognizer:
         if window is None or window.end_ms <= window.start_ms:
             return None
         loop = asyncio.get_running_loop()
-        text = (
-            await loop.run_in_executor(self._executor, self._infer, window.pcm)
-        ).strip()
+        await self._capacity.acquire()
+        try:
+            inference = loop.run_in_executor(self._executor, self._infer, window.pcm)
+        except RuntimeError:
+            self._capacity.release()
+            raise
+
+        def release(done: asyncio.Future[str]) -> None:
+            self._capacity.release()
+            if not done.cancelled():
+                done.exception()
+
+        # Timed-out callers leave at most one native inference in flight.
+        inference.add_done_callback(release)
+        text = (await asyncio.shield(inference)).strip()
         if not text:
             return None
         if window.final:
@@ -70,9 +86,10 @@ class FasterWhisper:
         )
         self._language = None if language == "auto" else language
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="asr")
+        self._capacity = asyncio.Lock()
 
     def new_recognizer(self) -> FasterWhisperRecognizer:
-        return FasterWhisperRecognizer(self._transcribe, self._executor)
+        return FasterWhisperRecognizer(self._transcribe, self._executor, self._capacity)
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)

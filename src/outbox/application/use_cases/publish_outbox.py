@@ -36,14 +36,16 @@ class PublishOutbox:
             try:
                 count = await self.pending_count()
                 if count != previous_count:
-                    logger.info("outbox.pending count=%d", count)
+                    logger.info("outbox.pending", extra={"pending_count": count})
                     previous_count = count
                 published = await self.publish_batch() if count else 0
             except Exception as error:
                 logger.warning(
-                    "outbox.poll_failed error=%s retry_seconds=%.1f",
-                    type(error).__name__,
-                    delay,
+                    "outbox.poll_failed",
+                    extra={
+                        "error_category": type(error).__name__,
+                        "retry_seconds": delay,
+                    },
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 5)

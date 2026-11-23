@@ -42,7 +42,8 @@ on loopback port 5432, RabbitMQ on 5672, and RabbitMQ management on 15672.
 Set `ASR_LANGUAGE=auto` for language detection. The model path, device, and
 compute type are configurable via `ASR_MODEL_PATH`, `ASR_DEVICE`, and
 `ASR_COMPUTE_TYPE`. Set `ASR_BACKEND=fake` for a deterministic demo
-without model files. Missing or invalid local weights fail startup.
+without model files. Missing or invalid local weights leave the API running
+with ASR unavailable in readiness and an `asr_unavailable` error on capture.
 
 Run `make smoke WAV=path/to/speech.wav` with a mono 16 kHz PCM16 WAV
 containing several seconds of continuous Russian speech. The smoke test
@@ -95,6 +96,23 @@ their application use cases, ports, and infrastructure adapters.
 `src/bootstrap` wires both components, and `src/storage` holds their shared
 PostgreSQL mappings. See the [recovery runbook](docs/demo-runbook.md) for
 worker restart, broker outage, and replay checks.
+
+## Readiness and metrics
+
+`GET /healthz` checks liveness. `GET /readyz` checks PostgreSQL, RabbitMQ,
+ASR, and the configured llama.cpp model separately and returns HTTP 503 if
+a dependency is unavailable. When `LLM_ENABLED=false`, llama.cpp is reported
+as disabled.
+
+`GET /metrics` exposes Prometheus text metrics for capture activity, queue
+depth, finalization and recommendation latency, inference failures, the
+outbox backlog, and worker outcomes. Run the API and worker from the same
+repository directory, or set `WORKER_METRICS_PATH` to the same local path
+for both processes. Its default is `.cache/worker-metrics.json`.
+
+Capture logs include event and correlation IDs with server-side timings.
+The ASR timing estimates audio end from received samples. Recommendation
+timing runs from transcript commit through recommendation commit.
 
 ## Session API
 

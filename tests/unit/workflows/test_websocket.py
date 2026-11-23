@@ -108,6 +108,7 @@ def make_client(
     *,
     audio_capacity: int = 30,
     flush_timeout: float = 5,
+    asr_timeout: float = 10,
     analysis: SupportAnalysis | None = None,
 ) -> TestClient:
     app = FastAPI()
@@ -120,6 +121,7 @@ def make_client(
                 store,
                 audio_capacity=audio_capacity,
                 flush_timeout=flush_timeout,
+                asr_timeout=asr_timeout,
                 analysis=analysis,
             )
         )
@@ -234,7 +236,7 @@ def test_recognition_failure_emits_error_without_final_transcript() -> None:
             socket.send_bytes(FRAME_1)
             event = socket.receive_json()
             assert event["event_type"] == "session.error"
-            assert event["payload"]["code"] == "capture_failed"
+            assert event["payload"]["code"] == "asr_failed"
             assert_close(socket, 1011)
     assert store.statuses[session_id] is SessionStatus.FAILED
 
@@ -455,3 +457,18 @@ def test_invalid_analysis_keeps_capture_open_and_allows_stop() -> None:
             )
             assert socket.receive_json()["event_type"] == "session.completed"
     assert store.statuses[session_id] is SessionStatus.COMPLETED
+
+
+def test_asr_timeout_releases_live_capture() -> None:
+    store = MemorySessionStore()
+    session_id = store.create()
+    recognizer = SlowRecognizer()
+    with make_client(store, recognizer, asr_timeout=0.05) as client:
+        with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+            start(socket, session_id)
+            socket.send_bytes(FRAME_1)
+            error = socket.receive_json()
+            assert error["payload"]["code"] == "asr_timeout"
+            assert_close(socket, 1011)
+    assert recognizer.cancelled.is_set()
+    assert store.statuses[session_id] is SessionStatus.FAILED

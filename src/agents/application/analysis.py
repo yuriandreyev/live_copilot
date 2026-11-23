@@ -22,6 +22,10 @@ class ModelError(Exception):
     pass
 
 
+class InvalidModelOutput(ModelError):
+    pass
+
+
 class CompletionModel(Protocol):
     async def complete(self, instructions: str, data: str) -> str: ...
 
@@ -73,7 +77,7 @@ class RecommendationAgent:
         )
         suggestion = Suggestion.model_validate_json(response)
         if not set(suggestion.faq_ids) <= candidates.keys():
-            raise ModelError("Unknown FAQ citation.")
+            raise InvalidModelOutput("Unknown FAQ citation.")
         return suggestion
 
 
@@ -81,6 +85,7 @@ class RecommendationAgent:
 class Analysis:
     context: AgentContext | None
     recommendation: Recommendation
+    model_outcomes: tuple[str, ...] = ()
 
 
 class SupportAnalysis:
@@ -96,6 +101,7 @@ class SupportAnalysis:
     ) -> Analysis:
         transcript = transcript[-2000:]
         context: AgentContext | None = None
+        model_outcomes: list[str] = []
         suggestion = Suggestion(
             action="Ask for a concrete example, including the event ID and when it happened.",
             rationale="The cause is unconfirmed with the available evidence.",
@@ -104,6 +110,7 @@ class SupportAnalysis:
         try:
             async with asyncio.timeout(ANALYSIS_TIMEOUT):
                 context = await self._context.identify(transcript)
+                model_outcomes.append("success")
                 if (
                     not isinstance(context, InsufficientContext)
                     and context.confidence >= 0.5
@@ -113,9 +120,16 @@ class SupportAnalysis:
                         proposed = await self._recommendation.suggest(
                             context, candidates
                         )
+                        model_outcomes.append("success")
                         if proposed.faq_ids:
                             suggestion = proposed
-        except (TimeoutError, ValidationError, ModelError):
+        except (TimeoutError, ValidationError, ModelError) as error:
+            if isinstance(error, TimeoutError):
+                model_outcomes.append("timeout")
+            elif isinstance(error, (ValidationError, InvalidModelOutput)):
+                model_outcomes.append("validation_error")
+            else:
+                model_outcomes.append("unavailable")
             suggestion = Suggestion(
                 action="Continue troubleshooting manually and record an example of the issue.",
                 rationale="Local AI analysis could not finish. The cause is unconfirmed.",
@@ -132,4 +146,5 @@ class SupportAnalysis:
                 faq_ids=tuple(dict.fromkeys(suggestion.faq_ids)),
                 prompt_version=PROMPT_VERSION,
             ),
+            tuple(model_outcomes),
         )
